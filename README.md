@@ -1,0 +1,2 @@
+# PolyGekko
+Greed is good.
