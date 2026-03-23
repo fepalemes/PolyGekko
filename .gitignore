@@ -137,3 +137,16 @@ dist
 # Vite logs files
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+
+# NestJS build
+api/dist/
+
+# Prisma
+api/prisma/migrations/
+
+# Next.js
+web/.next/
+web/out/
+
+# Data / runtime state
+data/

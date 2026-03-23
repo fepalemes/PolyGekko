@@ -1,0 +1,16 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: polygekko-api
+    restart: unless-stopped
+    env_file:
+      - ../.env
+    environment:
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./src:/app/src
+      - ./prisma:/app/prisma

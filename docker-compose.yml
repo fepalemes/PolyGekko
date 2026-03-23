@@ -1,0 +1,40 @@
+services:
+  # ─── NestJS API ────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    container_name: polygekko-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      PORT: 3001
+    ports:
+      - "3001:3001"
+    networks:
+      - polygekko
+
+  # ─── Next.js Frontend ──────────────────────────────────────
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    container_name: polygekko-web
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    networks:
+      - polygekko
+
+networks:
+  polygekko:
+    name: polygekko_network

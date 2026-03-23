@@ -1,0 +1,62 @@
+'use client';
+import { useQuery } from '@tanstack/react-query';
+import { MainLayout } from '@/components/layout/main-layout';
+import { StatsCards } from '@/components/dashboard/stats-cards';
+import { StrategyStatusCards } from '@/components/dashboard/strategy-status';
+import { PerformanceChart } from '@/components/dashboard/performance-chart';
+import { RecentActivity } from '@/components/dashboard/recent-activity';
+import { SimStatsPanel } from '@/components/dashboard/sim-stats-panel';
+import { BalancePanel } from '@/components/dashboard/balance-panel';
+import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance } from '@/lib/api';
+import { useSocketEvents } from '@/hooks/use-socket-events';
+
+export default function DashboardPage() {
+  useSocketEvents();
+  const { data: statuses = [] } = useQuery({
+    queryKey: ['strategies'],
+    queryFn: getStrategiesStatus,
+    refetchInterval: 5000,
+  });
+  const { data: simStats = [] } = useQuery({
+    queryKey: ['sim-stats'],
+    queryFn: getSimStats,
+    refetchInterval: 15000,
+  });
+  const { data: performance = [] } = useQuery({
+    queryKey: ['performance'],
+    queryFn: () => getPerformance(undefined, 200),
+    refetchInterval: 30000,
+  });
+  const { data: positions = [] } = useQuery({
+    queryKey: ['positions'],
+    queryFn: () => getPositions(),
+    refetchInterval: 10000,
+  });
+  const { data: trades = [] } = useQuery({
+    queryKey: ['trades'],
+    queryFn: () => getTrades({ limit: '50' }),
+    refetchInterval: 15000,
+  });
+
+  const copyTradeStatus = statuses.find(s => s.type === 'COPY_TRADE');
+  const isDryRun = copyTradeStatus?.isDryRun !== false;
+
+  return (
+    <MainLayout title="Dashboard">
+      <div className="space-y-5">
+        <div className="grid gap-5 lg:grid-cols-4">
+          <div className="lg:col-span-3">
+            <StatsCards simStats={simStats} positions={positions} tradesCount={trades.length} />
+          </div>
+          <BalancePanel isDryRun={isDryRun} />
+        </div>
+        <StrategyStatusCards statuses={statuses} />
+        <div className="grid gap-5 lg:grid-cols-2">
+          <PerformanceChart samples={performance} />
+          <RecentActivity trades={trades} />
+        </div>
+        <SimStatsPanel simStats={simStats} />
+      </div>
+    </MainLayout>
+  );
+}

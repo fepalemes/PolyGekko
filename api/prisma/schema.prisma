@@ -1,0 +1,135 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StrategyType {
+  COPY_TRADE
+  MARKET_MAKER
+  SNIPER
+}
+
+enum PositionStatus {
+  OPEN
+  SELLING
+  SOLD
+  REDEEMED
+}
+
+enum TradeSide {
+  BUY
+  SELL
+}
+
+enum TradeStatus {
+  PENDING
+  FILLED
+  CANCELLED
+  FAILED
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+  DEBUG
+}
+
+enum SimOutcome {
+  WIN
+  LOSS
+}
+
+model Setting {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique
+  value       String
+  category    String   @default("general")
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model StrategyConfig {
+  id        Int          @id @default(autoincrement())
+  type      StrategyType @unique
+  enabled   Boolean      @default(false)
+  isDryRun  Boolean      @default(true)
+  config    Json
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+}
+
+model Position {
+  id          Int            @id @default(autoincrement())
+  conditionId String         @unique
+  tokenId     String
+  market      String
+  shares      Decimal        @db.Decimal(18, 6)
+  avgBuyPrice Decimal        @db.Decimal(10, 6)
+  totalCost   Decimal        @db.Decimal(18, 6)
+  outcome     String
+  sellOrderId String?
+  status      PositionStatus @default(OPEN)
+  strategyType StrategyType
+  isDryRun     Boolean        @default(false)
+  // Filled after market resolution
+  resolvedPnl  Decimal?       @db.Decimal(18, 6)
+  simOutcome   SimOutcome?
+  trades       Trade[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+}
+
+model Trade {
+  id           Int          @id @default(autoincrement())
+  positionId   Int?
+  position     Position?    @relation(fields: [positionId], references: [id])
+  conditionId  String
+  tokenId      String
+  market       String
+  side         TradeSide
+  shares       Decimal      @db.Decimal(18, 6)
+  price        Decimal      @db.Decimal(10, 6)
+  cost         Decimal      @db.Decimal(18, 6)
+  orderId      String?
+  status       TradeStatus  @default(PENDING)
+  isDryRun     Boolean      @default(false)
+  strategyType StrategyType
+  createdAt    DateTime     @default(now())
+}
+
+model StrategyLog {
+  id           Int          @id @default(autoincrement())
+  strategyType StrategyType
+  level        LogLevel     @default(INFO)
+  message      String
+  metadata     Json?
+  createdAt    DateTime     @default(now())
+}
+
+model SimStats {
+  id           Int          @id @default(autoincrement())
+  strategyType StrategyType @unique
+  totalBuys    Int          @default(0)
+  wins         Int          @default(0)
+  losses       Int          @default(0)
+  pnl          Decimal      @default(0) @db.Decimal(18, 6)
+  updatedAt    DateTime     @updatedAt
+}
+
+// Time-series P&L snapshots for the performance chart
+model PerformanceSample {
+  id            Int          @id @default(autoincrement())
+  strategyType  StrategyType
+  cumulativePnl Decimal      @db.Decimal(18, 6)
+  pnlDelta      Decimal      @db.Decimal(18, 6)
+  outcome       SimOutcome
+  market        String
+  createdAt     DateTime     @default(now())
+}

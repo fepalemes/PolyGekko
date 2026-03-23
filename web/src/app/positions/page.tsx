@@ -1,0 +1,133 @@
+'use client';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { MainLayout } from '@/components/layout/main-layout';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { getPositions } from '@/lib/api';
+import { formatUSD, formatNumber, truncate, strategyLabel } from '@/lib/utils';
+import { formatDistanceToNow } from 'date-fns';
+import { useLang } from '@/lib/i18n';
+import type { PositionStatus } from '@/lib/types';
+
+const statusColors = {
+  OPEN: 'success',
+  SELLING: 'warning',
+  SOLD: 'secondary',
+  REDEEMED: 'info',
+} as const;
+
+export default function PositionsPage() {
+  const [filterStatus, setFilterStatus] = useState('ALL');
+  const [filterStrategy, setFilterStrategy] = useState('ALL');
+  const { t } = useLang();
+  const p = t.positions;
+
+  const { data: positions = [], isLoading } = useQuery({
+    queryKey: ['positions', filterStatus, filterStrategy],
+    queryFn: () => getPositions({
+      ...(filterStatus !== 'ALL' && { status: filterStatus }),
+      ...(filterStrategy !== 'ALL' && { strategyType: filterStrategy }),
+    }),
+    refetchInterval: 10000,
+  });
+
+  return (
+    <MainLayout title={p.title}>
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">{t.common.allStatuses}</SelectItem>
+              <SelectItem value="OPEN">Open</SelectItem>
+              <SelectItem value="SELLING">Selling</SelectItem>
+              <SelectItem value="SOLD">Sold</SelectItem>
+              <SelectItem value="REDEEMED">Redeemed</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={filterStrategy} onValueChange={setFilterStrategy}>
+            <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">{t.common.allStrategies}</SelectItem>
+              <SelectItem value="COPY_TRADE">{t.strategies.copyTrade.label}</SelectItem>
+              <SelectItem value="MARKET_MAKER">{t.strategies.marketMaker.label}</SelectItem>
+              <SelectItem value="SNIPER">{t.strategies.sniper.label}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="ml-auto text-sm text-muted-foreground">{positions.length} {p.title.toLowerCase()}</span>
+        </div>
+
+        <Card>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">{t.common.loading}</p>
+            ) : positions.length === 0 ? (
+              <p className="py-12 text-center text-sm text-muted-foreground">{p.noPositions}</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs text-muted-foreground">
+                      <th className="px-4 py-3 font-medium">{p.market}</th>
+                      <th className="px-4 py-3 font-medium">{p.outcome}</th>
+                      <th className="px-4 py-3 font-medium text-right">{p.shares}</th>
+                      <th className="px-4 py-3 font-medium text-right">{p.avgPrice}</th>
+                      <th className="px-4 py-3 font-medium text-right">{p.totalCost}</th>
+                      <th className="px-4 py-3 font-medium">
+                        <span className="flex items-center gap-1">
+                          {p.status} <HelpTooltip text={p.statusHelp} />
+                        </span>
+                      </th>
+                      <th className="px-4 py-3 font-medium text-right">
+                        <span className="flex items-center justify-end gap-1">
+                          {p.pnl} <HelpTooltip text={p.pnlHelp} />
+                        </span>
+                      </th>
+                      <th className="px-4 py-3 font-medium">{p.strategy}</th>
+                      <th className="px-4 py-3 font-medium">{p.age}</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {positions.map(pos => (
+                      <tr key={pos.id} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-4 py-2.5">
+                          <span className="text-foreground">{truncate(pos.market, 42)}</span>
+                          {pos.isDryRun && <Badge variant="warning" className="ml-2 text-[10px]">{t.common.simulated}</Badge>}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <Badge variant={pos.outcome === 'YES' ? 'success' : 'destructive'}>{pos.outcome}</Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono">{formatNumber(pos.shares)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono">${formatNumber(pos.avgBuyPrice, 4)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono">{formatUSD(pos.totalCost)}</td>
+                        <td className="px-4 py-2.5">
+                          <Badge variant={statusColors[pos.status as PositionStatus] || 'secondary'}>{pos.status}</Badge>
+                        </td>
+                        <td className="px-4 py-2.5 text-right font-mono text-xs">
+                          {pos.resolvedPnl != null ? (
+                            <span className={parseFloat(pos.resolvedPnl) >= 0 ? 'text-green-400' : 'text-red-400'}>
+                              {parseFloat(pos.resolvedPnl) >= 0 ? '+' : ''}{formatUSD(pos.resolvedPnl)}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">–</span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-muted-foreground text-xs">{strategyLabel(pos.strategyType)}</td>
+                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                          {formatDistanceToNow(new Date(pos.createdAt), { addSuffix: true })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </MainLayout>
+  );
+}
