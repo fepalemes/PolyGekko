@@ -10,6 +10,9 @@ const DEFAULT_SETTINGS = [
   { key: 'COPY_TRADE_FIXED_AMOUNT', value: '10', category: 'copy_trade', description: 'Fixed USDC amount per trade when SIZE_MODE=fixed' },
   { key: 'COPY_TRADE_SIZE_PERCENT', value: '10', category: 'copy_trade', description: 'Percentage of MAX_POSITION_SIZE (or balance) per trade' },
   { key: 'COPY_TRADE_MAX_POSITION_SIZE', value: '50', category: 'copy_trade', description: 'Max USDC per position' },
+  { key: 'COPY_TRADE_DYNAMIC_SIZING_ENABLED', value: 'false', category: 'copy_trade', description: 'Enable dynamic random sizing' },
+  { key: 'COPY_TRADE_MIN_ALLOCATION', value: '5', category: 'copy_trade', description: 'Minimum USDC to allocate dynamically' },
+  { key: 'COPY_TRADE_MAX_ALLOCATION', value: '25', category: 'copy_trade', description: 'Maximum USDC to allocate dynamically' },
   { key: 'COPY_TRADE_MIN_ENTRY_AMOUNT', value: '1', category: 'copy_trade', description: 'Minimum USDC to spend on an entry — never skips if size >= this' },
   { key: 'COPY_TRADE_AUTO_SELL_ENABLED', value: 'true', category: 'copy_trade', description: 'Place auto limit-sell after entry' },
   { key: 'COPY_TRADE_AUTO_SELL_PROFIT_PERCENT', value: '50', category: 'copy_trade', description: 'Take-profit target % above buy price' },
@@ -37,6 +40,12 @@ const DEFAULT_SETTINGS = [
   { key: 'MM_RECOVERY_THRESHOLD', value: '0.70', category: 'market_maker', description: 'Min price for recovery buy' },
   { key: 'MM_POLL_INTERVAL', value: '30', category: 'market_maker', description: 'Seconds between market detection polls' },
   { key: 'MM_SIM_BALANCE', value: '1000', category: 'market_maker', description: 'Fictitious balance for Market Maker simulation mode (USDC)' },
+  { key: 'MM_DYNAMIC_SIZING_ENABLED', value: 'false', category: 'market_maker', description: 'Enable dynamic sizing and fractional profit targets' },
+  { key: 'MM_MIN_ALLOCATION', value: '5', category: 'market_maker', description: 'Minimum USDC to allocate dynamically' },
+  { key: 'MM_MAX_ALLOCATION', value: '50', category: 'market_maker', description: 'Maximum USDC to allocate dynamically' },
+  { key: 'MM_SPREAD_PROFIT_TARGET', value: '0.01', category: 'market_maker', description: 'Take-profit margin above entry price (e.g. 0.01 = 1 cent)' },
+  { key: 'MM_BINANCE_TREND_ENABLED', value: 'false', category: 'market_maker', description: 'Use Binance momentum to skew YES/NO capital allocation' },
+  { key: 'MM_MAX_BIAS_PERCENT', value: '80', category: 'market_maker', description: 'Maximum bias percent (e.g. 80 means up to 80% capital on trending side)' },
 
   // ── Telegram ─────────────────────────────────────────────────────────────
   { key: 'TELEGRAM_ENABLED', value: 'false', category: 'telegram', description: 'Enable Telegram notifications' },
@@ -45,6 +54,9 @@ const DEFAULT_SETTINGS = [
 
   // ── System ──────────────────────────────────────────────────────────────────
   { key: 'POLYGON_RPC_URL', value: '', category: 'system', description: 'Polygon RPC endpoint (leave empty to use env var). Recommended: Alchemy or QuickNode for reliability' },
+  { key: 'GLOBAL_SIMULATION_MODE', value: 'true', category: 'system', description: 'Applies Simulation mode globally and overrides individual strategy dry-run settings' },
+  { key: 'GLOBAL_WALLET_MARGIN', value: '50', category: 'system', description: 'Minimum USDC that must remain in the wallet at all times across all strategies (Live mode)' },
+  { key: 'GLOBAL_MAX_ENTRIES_PER_MINUTE', value: '5', category: 'system', description: 'Maximum total entries across all strategies per minute (0 = unlimited)' },
 
   // ── Sniper ──────────────────────────────────────────────────────────────────
   { key: 'SNIPER_RUNNING', value: 'false', category: 'sniper', description: 'Whether the strategy is running (auto-restored on restart)' },
@@ -57,6 +69,7 @@ const DEFAULT_SETTINGS = [
   { key: 'SNIPER_PAUSE_ROUNDS_AFTER_WIN', value: '2', category: 'sniper', description: 'Rounds to pause asset after a win' },
   { key: 'SNIPER_MULTIPLIERS', value: '', category: 'sniper', description: 'Time-based sizing: "HH:MM-HH:MM:factor,..."' },
   { key: 'SNIPER_SCHEDULE', value: '', category: 'sniper', description: 'Per-asset schedule: "ETH=11:40-15:40,BTC=09:00-17:00"' },
+  { key: 'SNIPER_SIM_BALANCE', value: '1000', category: 'sniper', description: 'Fictitious balance for Sniper simulation mode (USDC)' },
 ];
 
 @Injectable()
@@ -95,6 +108,18 @@ export class SettingsService implements OnModuleInit {
     return val ? parseFloat(val) : defaultValue;
   }
 
+  async isGlobalSimulationMode(): Promise<boolean> {
+    return this.getBool('GLOBAL_SIMULATION_MODE', true);
+  }
+
+  async getGlobalWalletMargin(): Promise<number> {
+    return this.getNumber('GLOBAL_WALLET_MARGIN', 50);
+  }
+
+  async getGlobalMaxEntriesPerMinute(): Promise<number> {
+    return this.getNumber('GLOBAL_MAX_ENTRIES_PER_MINUTE', 5);
+  }
+
   async getBool(key: string, defaultValue = false): Promise<boolean> {
     const val = await this.get(key);
     if (val === null) return defaultValue;
@@ -123,6 +148,9 @@ export class SettingsService implements OnModuleInit {
       fixedAmount: parseFloat(map.COPY_TRADE_FIXED_AMOUNT || '10'),
       sizePercent: parseFloat(map.COPY_TRADE_SIZE_PERCENT || '10'),
       maxPositionSize: parseFloat(map.COPY_TRADE_MAX_POSITION_SIZE || '50'),
+      dynamicSizingEnabled: map.COPY_TRADE_DYNAMIC_SIZING_ENABLED === 'true',
+      minAllocation: parseFloat(map.COPY_TRADE_MIN_ALLOCATION || '5'),
+      maxAllocation: parseFloat(map.COPY_TRADE_MAX_ALLOCATION || '25'),
       minEntryAmount: parseFloat(map.COPY_TRADE_MIN_ENTRY_AMOUNT || '1'),
       autoSellEnabled: map.COPY_TRADE_AUTO_SELL_ENABLED === 'true',
       autoSellProfitPercent: parseFloat(map.COPY_TRADE_AUTO_SELL_PROFIT_PERCENT || '50'),
@@ -153,6 +181,12 @@ export class SettingsService implements OnModuleInit {
       recoveryThreshold: parseFloat(map.MM_RECOVERY_THRESHOLD || '0.70'),
       pollInterval: parseInt(map.MM_POLL_INTERVAL || '30'),
       simBalance: parseFloat(map.MM_SIM_BALANCE || '1000'),
+      dynamicSizingEnabled: map.MM_DYNAMIC_SIZING_ENABLED === 'true',
+      minAllocation: parseFloat(map.MM_MIN_ALLOCATION || '5'),
+      maxAllocation: parseFloat(map.MM_MAX_ALLOCATION || '50'),
+      spreadProfitTarget: parseFloat(map.MM_SPREAD_PROFIT_TARGET || '0.01'),
+      binanceTrendEnabled: map.MM_BINANCE_TREND_ENABLED === 'true',
+      maxBiasPercent: parseFloat(map.MM_MAX_BIAS_PERCENT || '80'),
     };
   }
 
@@ -168,6 +202,7 @@ export class SettingsService implements OnModuleInit {
       pauseRoundsAfterWin: parseInt(map.SNIPER_PAUSE_ROUNDS_AFTER_WIN || '2'),
       multipliers: map.SNIPER_MULTIPLIERS || '',
       schedule: map.SNIPER_SCHEDULE || '',
+      simBalance: parseFloat(map.SNIPER_SIM_BALANCE || '1000'),
     };
   }
 }

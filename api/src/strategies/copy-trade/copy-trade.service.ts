@@ -35,7 +35,7 @@ export class CopyTradeService {
     if (this.running) return { message: 'Already running' };
 
     const config = await this.settings.getCopyTradeConfig();
-    this.isDryRun = await this.settings.getBool('COPY_TRADE_DRY_RUN', true);
+    this.isDryRun = await this.settings.isGlobalSimulationMode();
 
     if (!config.traderAddress) {
       await this.logs.warn(StrategyType.COPY_TRADE, 'COPY_TRADE_TRADER_ADDRESS not configured');

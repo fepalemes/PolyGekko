@@ -9,6 +9,7 @@ import { PositionsService } from '../../positions/positions.service';
 import { EventsGateway } from '../../events/events.gateway';
 import { SimStatsService } from '../sim-stats.service';
 import { SniperSizingService } from './sniper-sizing.service';
+import { SettingsService } from '../../settings/settings.service';
 
 interface SniperAssetState {
   asset: string;
@@ -33,6 +34,7 @@ export class SniperExecutorService {
     private events: EventsGateway,
     private simStats: SimStatsService,
     private sizing: SniperSizingService,
+    private settings: SettingsService,
   ) {}
 
   start(config: any, isDryRun: boolean) {
@@ -92,6 +94,15 @@ export class SniperExecutorService {
         : [];
     if (tokens.length < 2) return;
 
+    const maxPerMin = await this.settings.getGlobalMaxEntriesPerMinute();
+    if (maxPerMin > 0) {
+      const allowed = await this.positions.acquireGlobalEntry(maxPerMin, 60);
+      if (!allowed) {
+        await this.logs.warn(StrategyType.SNIPER, `[RATE LIMIT] Max entries per min (${maxPerMin}) reached — skipping ${asset}`);
+        return;
+      }
+    }
+
     const tiers: [number, number][] = [
       [this.config.tier1Price, tier1Shares],
       [this.config.tier2Price, tier2Shares],
@@ -103,6 +114,17 @@ export class SniperExecutorService {
     const avgPrice = totalShares > 0 ? totalCost / totalShares : 0;
 
     if (this.isDryRun) {
+      const simCost = totalCost * Math.min(tokens.length, 2);
+      const liveBalance = await this.settings.getNumber('SNIPER_SIM_BALANCE', 1000);
+      const minLiveBal = await this.settings.getGlobalWalletMargin();
+
+      if (liveBalance < simCost || liveBalance - simCost < minLiveBal) {
+        await this.logs.warn(StrategyType.SNIPER, `[SIM] Insufficient sim balance to snipe ${asset} — min wallet margin is $${minLiveBal} (Balance: $${liveBalance.toFixed(2)})`);
+        return;
+      }
+
+      await this.settings.set('SNIPER_SIM_BALANCE', (liveBalance - simCost).toFixed(2));
+
       await this.logs.info(
         StrategyType.SNIPER,
         `[SIM] ${asset.toUpperCase()} x${multiplier} — orders: ` +
@@ -152,6 +174,14 @@ export class SniperExecutorService {
       }
     } else {
       await this.logs.info(StrategyType.SNIPER, `Placing sniper orders for ${asset.toUpperCase()} | x${multiplier} | ${maxShares} shares`);
+      
+      const liveBalance = await this.clob.getBalance();
+      const minLiveBal = await this.settings.getGlobalWalletMargin();
+      if (liveBalance < totalCost || liveBalance - totalCost < minLiveBal) {
+        await this.logs.warn(StrategyType.SNIPER, `Insufficient live balance to snipe ${asset} — min wallet margin is $${minLiveBal}`);
+        return;
+      }
+
       for (const tokenId of tokens) {
         for (const [price, shares] of tiers) {
           if (shares < 1) continue;

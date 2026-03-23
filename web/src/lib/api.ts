@@ -62,6 +62,8 @@ export const clearSimData = () =>
   apiFetch('/strategies/sim-data', { method: 'DELETE' });
 export const getBalance = (isDryRun = true) =>
   apiFetch<{ balance: number; isSimulated: boolean }>(`/strategies/balance?isDryRun=${isDryRun}`);
+export const getRealBalance = () =>
+  apiFetch<{ balance: number }>('/polymarket/balance');
 export const updateSimBalance = (value: string) =>
   apiFetch('/settings', { method: 'PATCH', body: JSON.stringify([
     { key: 'COPY_TRADE_SIM_BALANCE', value },

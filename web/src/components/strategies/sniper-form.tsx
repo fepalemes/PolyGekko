@@ -30,6 +30,7 @@ export function SniperForm({ settings, onSaved }: { settings: Setting[]; onSaved
     SNIPER_PAUSE_ROUNDS_AFTER_WIN: getVal(settings, 'SNIPER_PAUSE_ROUNDS_AFTER_WIN', '2'),
     SNIPER_MULTIPLIERS: getVal(settings, 'SNIPER_MULTIPLIERS', ''),
     SNIPER_SCHEDULE: getVal(settings, 'SNIPER_SCHEDULE', ''),
+    SNIPER_SIM_BALANCE: getVal(settings, 'SNIPER_SIM_BALANCE', '1000'),
   });
 
   const set = (key: string, value: string) => setForm(f => ({ ...f, [key]: value }));
@@ -54,20 +55,6 @@ export function SniperForm({ settings, onSaved }: { settings: Setting[]; onSaved
         <p className="text-xs text-muted-foreground leading-relaxed">{t.strategies.sniper.description}</p>
       </CardHeader>
       <CardContent className="space-y-5">
-
-        {/* Dry Run */}
-        <div className="flex items-center justify-between rounded-lg border border-border p-3">
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              {t.strategies.copyTrade.fields.dryRun.label}
-              <HelpTooltip text={t.strategies.copyTrade.fields.dryRun.help} />
-            </p>
-          </div>
-          <Switch
-            checked={form.SNIPER_DRY_RUN === 'true'}
-            onCheckedChange={v => set('SNIPER_DRY_RUN', v.toString())}
-          />
-        </div>
 
         {/* Assets */}
         <div className="space-y-1.5">
@@ -181,6 +168,21 @@ export function SniperForm({ settings, onSaved }: { settings: Setting[]; onSaved
             placeholder={f.schedule.placeholder}
             value={form.SNIPER_SCHEDULE}
             onChange={e => set('SNIPER_SCHEDULE', e.target.value)}
+          />
+        </div>
+
+        {/* Sim Balance */}
+        <div className="space-y-1.5">
+          <Label htmlFor="sim-balance" className="flex items-center gap-1.5">
+            {t.strategies.copyTrade.fields.simBalance.label} <HelpTooltip text={t.strategies.copyTrade.fields.simBalance.help} />
+          </Label>
+          <Input
+            id="sim-balance"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.SNIPER_SIM_BALANCE}
+            onChange={e => set('SNIPER_SIM_BALANCE', e.target.value)}
           />
         </div>
 

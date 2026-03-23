@@ -9,9 +9,10 @@ interface StatsCardsProps {
   simStats: SimStats[];
   positions: Position[];
   tradesCount: number;
+  isDryRun?: boolean;
 }
 
-export function StatsCards({ simStats, positions, tradesCount }: StatsCardsProps) {
+export function StatsCards({ simStats, positions, tradesCount, isDryRun = true }: StatsCardsProps) {
   const { t } = useLang();
   const totalPnl = simStats.reduce((sum, s) => sum + parseFloat(s.pnl || '0'), 0);
   const totalWins = simStats.reduce((sum, s) => sum + s.wins, 0);
@@ -33,7 +34,7 @@ export function StatsCards({ simStats, positions, tradesCount }: StatsCardsProps
           {totalPnl >= 0 ? '+' : ''}{formatUSD(totalPnl)}
         </span>
       ),
-      sub: d.simulatedPnl,
+      sub: isDryRun ? d.simulatedPnl : '',
       accent: pnlPositive ? 'border-l-green-500/40' : 'border-l-red-500/40',
     },
     {

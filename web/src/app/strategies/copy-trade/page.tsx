@@ -18,7 +18,13 @@ export default function CopyTradePage() {
     queryKey: ['settings', 'copy_trade'],
     queryFn: () => getSettingsByCategory('copy_trade'),
   });
+  const { data: systemSettings = [] } = useQuery({
+    queryKey: ['settings', 'system'],
+    queryFn: () => getSettingsByCategory('system'),
+  });
 
+  const simModeSetting = systemSettings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
+  const isDryRun = simModeSetting ? simModeSetting.value === 'true' : true;
   const status = statuses.find(s => s.type === 'COPY_TRADE') || { type: 'COPY_TRADE' as const, running: false, isDryRun: true };
 
   return (
@@ -29,6 +35,7 @@ export default function CopyTradePage() {
           label={t.strategies.copyTrade.label}
           description={t.strategies.copyTrade.howItWorks}
           queryKey={['strategies']}
+          isDryRun={isDryRun}
         />
         <CopyTradeForm settings={settings} onSaved={() => { refetch(); qc.invalidateQueries({ queryKey: ['strategies'] }); }} />
       </div>

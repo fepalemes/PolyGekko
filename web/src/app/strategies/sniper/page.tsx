@@ -18,7 +18,13 @@ export default function SniperPage() {
     queryKey: ['settings', 'sniper'],
     queryFn: () => getSettingsByCategory('sniper'),
   });
+  const { data: systemSettings = [] } = useQuery({
+    queryKey: ['settings', 'system'],
+    queryFn: () => getSettingsByCategory('system'),
+  });
 
+  const simModeSetting = systemSettings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
+  const isDryRun = simModeSetting ? simModeSetting.value === 'true' : true;
   const status = statuses.find(s => s.type === 'SNIPER') || { type: 'SNIPER' as const, running: false, isDryRun: true };
 
   return (
@@ -29,6 +35,7 @@ export default function SniperPage() {
           label={t.strategies.sniper.label}
           description={t.strategies.sniper.howItWorks}
           queryKey={['strategies']}
+          isDryRun={isDryRun}
         />
         <SniperForm settings={settings} onSaved={() => { refetch(); qc.invalidateQueries({ queryKey: ['strategies'] }); }} />
       </div>

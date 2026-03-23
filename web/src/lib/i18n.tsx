@@ -47,6 +47,8 @@ const T = {
 
     header: {
       connectedHelp: 'Real-time connection to the API via WebSocket. When connected, the dashboard updates instantly when trades occur or strategies change state.',
+      simMode: 'Sim Mode',
+      simModeHelp: 'When ON, the system runs globally in Simulation mode, meaning no real orders are sent. When OFF, real funds are used depending on each strategy config.',
     },
 
     dashboard: {
@@ -185,6 +187,22 @@ const T = {
           adaptiveCL: {
             label: 'Adaptive Cut-Loss',
             help: 'When enabled, the cut-loss threshold adapts based on the current combined price of YES + NO tokens. If the combined price is still above the minimum threshold, it keeps the orders open longer rather than cutting early.',
+          },
+          dynamicSizingEnabled: {
+            label: 'Dynamic Sizing',
+            help: 'Enable variable allocation sizes instead of fixed amounts. Picks a random entry chunk between Min and Max Allocation.',
+          },
+          minAllocation: {
+            label: 'Min Allocation (USDC)',
+            help: 'Minimum USDC to allocate dynamically per trade.',
+          },
+          maxAllocation: {
+            label: 'Max Allocation (USDC)',
+            help: 'Maximum USDC to allocate dynamically per trade.',
+          },
+          spreadProfitTarget: {
+            label: 'Spread Profit Target (USDC)',
+            help: 'Take-profit margin above entry price for penny-profit taking (e.g. 0.01 for 1 cent).',
           },
           recoveryBuy: {
             label: 'Recovery Buy',
@@ -377,6 +395,8 @@ const T = {
 
     header: {
       connectedHelp: 'Conexão em tempo real com a API via WebSocket. Quando conectado, o painel atualiza instantaneamente quando operações ocorrem ou as estratégias mudam de estado.',
+      simMode: 'Modo Simulação',
+      simModeHelp: 'Quando LIGADO, o sistema roda globalmente em Simulação (sem usar saldos reais). Quando DESLIGADO, valores reais são usados dependendo de cada estratégia.',
     },
 
     dashboard: {
@@ -515,6 +535,22 @@ const T = {
           adaptiveCL: {
             label: 'Corte de Perda Adaptativo',
             help: 'Quando ativado, o limite de corte de perda se adapta com base no preço combinado atual dos tokens SIM + NÃO. Se o preço combinado ainda estiver acima do limite mínimo, mantém as ordens abertas por mais tempo em vez de cortar cedo.',
+          },
+          dynamicSizingEnabled: {
+            label: 'Alocação Dinâmica',
+            help: 'Ativa alocações variáveis e de tamanhos menores ao invés de valores fixos.',
+          },
+          minAllocation: {
+            label: 'Alocação Mínima (USDC)',
+            help: 'Mínimo de USDC para alocar dinamicamente.',
+          },
+          maxAllocation: {
+            label: 'Alocação Máxima (USDC)',
+            help: 'Máximo de USDC para alocar dinamicamente.',
+          },
+          spreadProfitTarget: {
+            label: 'Margem Alvo de Lucro (USDC)',
+            help: 'Lucro alvo em centavos acima do valor de entrada (ex: 0.01 para buscar 1 centavo).',
           },
           recoveryBuy: {
             label: 'Compra de Recuperação',

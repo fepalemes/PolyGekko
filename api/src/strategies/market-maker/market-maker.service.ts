@@ -32,7 +32,7 @@ export class MarketMakerService {
   async start() {
     if (this.running) return { message: 'Already running' };
     const config = await this.settings.getMarketMakerConfig();
-    this.isDryRun = await this.settings.getBool('MM_DRY_RUN', true);
+    this.isDryRun = await this.settings.isGlobalSimulationMode();
     this.running = true;
     this.startedAt = new Date();
 
@@ -53,6 +53,7 @@ export class MarketMakerService {
     await this.settings.set('MM_RUNNING', 'false');
 
     this.detector.stop();
+    await this.executor.stopAll();
     this.executor.reset();
     await this.logs.info(StrategyType.MARKET_MAKER, 'Strategy stopped');
     this.events.emitStrategyStatus(this.getStatus());

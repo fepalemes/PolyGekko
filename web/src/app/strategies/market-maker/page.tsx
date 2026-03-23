@@ -18,7 +18,13 @@ export default function MarketMakerPage() {
     queryKey: ['settings', 'market_maker'],
     queryFn: () => getSettingsByCategory('market_maker'),
   });
+  const { data: systemSettings = [] } = useQuery({
+    queryKey: ['settings', 'system'],
+    queryFn: () => getSettingsByCategory('system'),
+  });
 
+  const simModeSetting = systemSettings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
+  const isDryRun = simModeSetting ? simModeSetting.value === 'true' : true;
   const status = statuses.find(s => s.type === 'MARKET_MAKER') || { type: 'MARKET_MAKER' as const, running: false, isDryRun: true };
 
   return (
@@ -29,6 +35,7 @@ export default function MarketMakerPage() {
           label={t.strategies.marketMaker.label}
           description={t.strategies.marketMaker.howItWorks}
           queryKey={['strategies']}
+          isDryRun={isDryRun}
         />
         <MarketMakerForm settings={settings} onSaved={() => { refetch(); qc.invalidateQueries({ queryKey: ['strategies'] }); }} />
       </div>

@@ -10,6 +10,7 @@ import { SimStatsService } from '../sim-stats.service';
 import { EventsGateway } from '../../events/events.gateway';
 import { DetectorService } from './detector.service';
 import { TelegramService } from '../../notifications/telegram.service';
+import { BinanceService } from '../../polymarket/binance.service';
 
 interface MMPosition {
   conditionId: string;
@@ -17,10 +18,18 @@ interface MMPosition {
   question: string;
   yesTokenId: string;
   noTokenId: string;
+  yesBuyOrderId?: string;
+  noBuyOrderId?: string;
   yesSellOrderId?: string;
   noSellOrderId?: string;
-  yesFilled: boolean;
-  noFilled: boolean;
+  yesBuyFilled: boolean;
+  noBuyFilled: boolean;
+  yesSellFilled: boolean;
+  noSellFilled: boolean;
+  yesSharesOwned: number;
+  noSharesOwned: number;
+  targetSellYes: number;
+  targetSellNo: number;
   startTime: Date;
   endTime: Date;
   isDryRun: boolean;
@@ -47,6 +56,7 @@ export class MmExecutorService {
     private events: EventsGateway,
     private detector: DetectorService,
     private telegram: TelegramService,
+    private binance: BinanceService,
   ) {}
 
   setConfig(config: any, isDryRun: boolean) {
@@ -57,6 +67,16 @@ export class MmExecutorService {
   reset() {
     this.positions.clear();
     this.doneConditionIds.clear();
+  }
+
+  async stopAll() {
+    this.logger.warn(`[MM] Stop clicked. Panic-selling ${this.positions.size} open positions...`);
+    const posEntries = Array.from(this.positions.entries());
+    for (const [conditionId, pos] of posEntries) {
+      this.logger.warn(`[MM] Liquidating "${pos.question}"`);
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[PANIC SELL] Strategy stopped. Liquidating "${pos.question}"...`);
+      await this.cutLoss(conditionId);
+    }
   }
 
   async onMarketDetected(market: any, asset: string) {
@@ -102,8 +122,14 @@ export class MmExecutorService {
       question: market.question,
       yesTokenId: tokens[0],
       noTokenId: tokens[1],
-      yesFilled: false,
-      noFilled: false,
+      yesBuyFilled: false,
+      noBuyFilled: false,
+      yesSellFilled: false,
+      noSellFilled: false,
+      yesSharesOwned: 0,
+      noSharesOwned: 0,
+      targetSellYes: 0,
+      targetSellNo: 0,
       startTime,
       endTime,
       isDryRun: this.isDryRun,
@@ -145,68 +171,128 @@ export class MmExecutorService {
       return;
     }
 
-    this.logger.log(`[${this.isDryRun ? 'SIM' : 'LIVE'}] Entering: "${pos.question}" | size: $${this.config.tradeSize} | target: $${this.config.sellPrice} | ${Math.round(timeLeft / 1000)}s remaining`);
+    const maxPerMin = await this.settings.getGlobalMaxEntriesPerMinute();
+    if (maxPerMin > 0) {
+      const allowed = await this.positionsService.acquireGlobalEntry(maxPerMin, 60);
+      if (!allowed) {
+        this.logger.warn(`[RATE LIMIT] Max entries per minute (${maxPerMin}) reached. Skipping "${pos.question}"`);
+        await this.logs.warn(StrategyType.MARKET_MAKER, `[RATE LIMIT] Max entries per minute (${maxPerMin}) reached — skipping`);
+        this.cleanup(conditionId);
+        return;
+      }
+    }
+
+    const tradeSize = this.config.dynamicSizingEnabled
+      ? Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2))
+      : this.config.tradeSize;
+    
+    (pos as any)._tradeSize = tradeSize;
+
+    // --- Binance Trend Sizing ---
+    let yesWeight = 0.5;
+    let noWeight = 0.5;
+    if (this.config.binanceTrendEnabled && pos.asset) {
+      const trend = await this.binance.getTrendPercent(pos.asset);
+      const weights = this.binance.calculateWeight(trend, this.config.maxBiasPercent || 80);
+      yesWeight = weights.yesWeight;
+      noWeight = weights.noWeight;
+      await this.logs.info(StrategyType.MARKET_MAKER, `[BINANCE] Trend for ${pos.asset} is ${trend.toFixed(2)}%. Ratio -> YES: ${Math.round(yesWeight*100)}% / NO: ${Math.round(noWeight*100)}%`);
+    }
+
+    const yesCapital = tradeSize * yesWeight;
+    const noCapital = tradeSize * noWeight;
+
+    const [yesMid, noMid] = await Promise.all([
+      this.clob.getMidpoint(pos.yesTokenId).catch(() => 0.5),
+      this.clob.getMidpoint(pos.noTokenId).catch(() => 0.5),
+    ]);
+
+    const yesBuyPrice = Math.min(0.99, Math.max(0.01, yesMid));
+    const noBuyPrice = Math.min(0.99, Math.max(0.01, noMid));
+
+    pos.targetSellYes = this.config.dynamicSizingEnabled ? yesBuyPrice + this.config.spreadProfitTarget : this.config.sellPrice;
+    pos.targetSellNo = this.config.dynamicSizingEnabled ? noBuyPrice + this.config.spreadProfitTarget : this.config.sellPrice;
+
+    pos.yesSharesOwned = (yesCapital / yesBuyPrice) || 0;
+    pos.noSharesOwned = (noCapital / noBuyPrice) || 0;
+
+    this.logger.log(`[${this.isDryRun ? 'SIM' : 'LIVE'}] Entering: "${pos.question}" | size: $${tradeSize} (${(yesWeight*100).toFixed(0)}/${(noWeight*100).toFixed(0)}) | YES tgt: $${pos.targetSellYes.toFixed(3)}, NO tgt: $${pos.targetSellNo.toFixed(3)}`);
     await this.logs.info(
       StrategyType.MARKET_MAKER,
       `[${this.isDryRun ? 'SIM' : 'LIVE'}] Entering: "${pos.question}" | ` +
-      `size: $${this.config.tradeSize} | target sell: $${this.config.sellPrice} | ` +
-      `${Math.round(timeLeft / 1000)}s remaining`,
+      `capital: $${tradeSize.toFixed(2)} | YES: $${yesCapital.toFixed(2)} @ $${yesBuyPrice.toFixed(3)} | NO: $${noCapital.toFixed(2)} @ $${noBuyPrice.toFixed(3)}`,
     );
 
     if (this.isDryRun) {
-      await this.enterSim(pos);
+      await this.enterSim(pos, tradeSize, yesCapital, noCapital, yesBuyPrice, noBuyPrice);
       return;
     }
 
-    // Live mode: split via CTF then place GTC sell orders on both sides
-    const splitTxHash = await this.ctf.splitPosition(conditionId, this.config.tradeSize);
-    if (!splitTxHash) {
-      await this.logs.error(StrategyType.MARKET_MAKER, `CTF split failed for ${pos.question}`);
+    // ── Live balance guard ────────────────────────────────────────────────
+    const liveBalance = await this.clob.getBalance();
+    const minLiveBal = await this.settings.getGlobalWalletMargin();
+    if (liveBalance < tradeSize) {
+      this.logger.warn(`[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} < $${tradeSize}`);
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} — need $${tradeSize}`);
       this.cleanup(conditionId);
       return;
     }
-    await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Split tx: ${splitTxHash}`);
+    if (liveBalance - tradeSize < minLiveBal) {
+      this.logger.warn(`[LIVE] Order trades below min margin $${minLiveBal} (balance: $${liveBalance.toFixed(2)})`);
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Order would leave balance below min margin $${minLiveBal} (balance: $${liveBalance.toFixed(2)}) — skipping`);
+      this.cleanup(conditionId);
+      return;
+    }
 
+    // Live mode: place GTC BUY orders on both sides
     try {
       const [yesResult, noResult] = await Promise.all([
-        this.clob.placeGTCOrder(pos.yesTokenId, 'SELL', this.config.sellPrice, this.config.tradeSize),
-        this.clob.placeGTCOrder(pos.noTokenId, 'SELL', this.config.sellPrice, this.config.tradeSize),
+        this.clob.placeGTCOrder(pos.yesTokenId, 'BUY', yesBuyPrice, pos.yesSharesOwned),
+        this.clob.placeGTCOrder(pos.noTokenId, 'BUY', noBuyPrice, pos.noSharesOwned),
       ]);
 
-      if (yesResult?.id) pos.yesSellOrderId = yesResult.id;
-      if (noResult?.id) pos.noSellOrderId = noResult.id;
+      if (yesResult?.id) pos.yesBuyOrderId = yesResult.id;
+      if (noResult?.id) pos.noBuyOrderId = noResult.id;
 
       await this.logs.info(
         StrategyType.MARKET_MAKER,
-        `[LIVE] GTC orders placed: YES order=${pos.yesSellOrderId}, NO order=${pos.noSellOrderId}`,
+        `[LIVE] GTC BUY orders placed: YES order=${pos.yesBuyOrderId}, NO order=${pos.noBuyOrderId}`,
       );
 
       this.monitorFillsLive(conditionId);
     } catch (err) {
-      await this.logs.error(StrategyType.MARKET_MAKER, `Order placement failed: ${err.message}`);
+      await this.logs.error(StrategyType.MARKET_MAKER, `BUY Order placement failed: ${err.message}`);
       this.cleanup(conditionId);
     }
   }
 
   // ─── Simulation entry ─────────────────────────────────────────────────────
 
-  private async enterSim(pos: MMPosition) {
+  private async enterSim(
+    pos: MMPosition,
+    tradeSize: number,
+    yesCapital: number,
+    noCapital: number,
+    yesBuyPrice: number,
+    noBuyPrice: number
+  ) {
     const { conditionId } = pos;
-    const tradeSize = this.config.tradeSize;
-    const tokensPerSide = tradeSize / 0.5; // $10 split → 20 YES + 20 NO tokens (each worth $0.5)
+    // In SIM, we assume BUY fills immediately at the Midpoint we fetched.
+    pos.yesBuyFilled = true;
+    pos.noBuyFilled = true;
 
-    // Final hard guard — check actual time right before committing
+    // Final hard guard
     const nowMs = Date.now();
     const timeLeftMs = pos.endTime.getTime() - nowMs;
     const minRequired = (this.config.cutLossTime + 30) * 1000;
     if (timeLeftMs <= 0) {
-      this.logger.warn(`[SIM] Entry aborted — market already expired: "${pos.question}" (ended ${Math.round(-timeLeftMs / 1000)}s ago)`);
+      this.logger.warn(`[SIM] Entry aborted — market already expired: "${pos.question}"`);
       await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Entry aborted — market already expired: "${pos.question}"`);
       this.cleanup(conditionId);
       return;
     }
     if (timeLeftMs < minRequired) {
-      this.logger.warn(`[SIM] Entry aborted — only ${Math.round(timeLeftMs / 1000)}s left, need ${Math.round(minRequired / 1000)}s: "${pos.question}"`);
+      this.logger.warn(`[SIM] Entry aborted — insufficient time`);
       await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Entry aborted — insufficient time (${Math.round(timeLeftMs / 1000)}s): "${pos.question}"`);
       this.cleanup(conditionId);
       return;
@@ -214,12 +300,17 @@ export class MmExecutorService {
 
     // Check sim balance
     const balance = await this.settings.getNumber('MM_SIM_BALANCE', 1000);
+    const minBal = await this.settings.getGlobalWalletMargin();
+    
     if (balance < tradeSize) {
       this.logger.warn(`[SIM] Insufficient balance: $${balance.toFixed(2)} < $${tradeSize}`);
-      await this.logs.warn(
-        StrategyType.MARKET_MAKER,
-        `[SIM] Insufficient balance: $${balance.toFixed(2)} — need $${tradeSize}`,
-      );
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient balance: $${balance.toFixed(2)} — need $${tradeSize}`);
+      this.cleanup(conditionId);
+      return;
+    }
+    
+    if (balance - tradeSize < minBal) {
+      this.logger.warn(`[SIM] Order leaves balance below min margin $${minBal}`);
       this.cleanup(conditionId);
       return;
     }
@@ -227,14 +318,14 @@ export class MmExecutorService {
     // Deduct from sim balance
     await this.settings.set('MM_SIM_BALANCE', (balance - tradeSize).toFixed(2));
 
-    // Create DB position so it shows in the Positions page
+    // Create DB position
     try {
       const dbPos = await this.positionsService.create({
         conditionId,
         tokenId: pos.yesTokenId,
         market: pos.question,
-        shares: tokensPerSide,
-        avgBuyPrice: 0.5,
+        shares: pos.yesSharesOwned + pos.noSharesOwned, // total shares combined
+        avgBuyPrice: (yesBuyPrice + noBuyPrice) / 2, // arbitrary for display
         totalCost: tradeSize,
         outcome: 'UP+DOWN',
         strategyType: StrategyType.MARKET_MAKER,
@@ -242,19 +333,14 @@ export class MmExecutorService {
       });
       pos.dbPositionId = dbPos.id;
 
-      // Record the BUY trade
+      // Make 2 trade records for clarity
       await this.trades.create({
-        positionId: dbPos.id,
-        conditionId,
-        tokenId: pos.yesTokenId,
-        market: pos.question,
-        side: TradeSide.BUY,
-        shares: tokensPerSide,
-        price: 0.5,
-        cost: tradeSize,
-        status: TradeStatus.FILLED,
-        isDryRun: true,
-        strategyType: StrategyType.MARKET_MAKER,
+        positionId: dbPos.id, conditionId, tokenId: pos.yesTokenId, market: pos.question, side: TradeSide.BUY,
+        shares: pos.yesSharesOwned, price: yesBuyPrice, cost: yesCapital, status: TradeStatus.FILLED, isDryRun: true, strategyType: StrategyType.MARKET_MAKER,
+      });
+      await this.trades.create({
+        positionId: dbPos.id, conditionId, tokenId: pos.noTokenId, market: pos.question, side: TradeSide.BUY,
+        shares: pos.noSharesOwned, price: noBuyPrice, cost: noCapital, status: TradeStatus.FILLED, isDryRun: true, strategyType: StrategyType.MARKET_MAKER,
       });
 
       await this.simStats.recordBuy(StrategyType.MARKET_MAKER);
@@ -264,32 +350,27 @@ export class MmExecutorService {
     }
 
     const remainingBal = balance - tradeSize;
-    this.logger.log(`[SIM] Simulated split: $${tradeSize} → ${tokensPerSide} YES + ${tokensPerSide} NO tokens | balance: $${remainingBal.toFixed(2)}`);
-    await this.logs.info(
-      StrategyType.MARKET_MAKER,
-      `[SIM] Simulated split: $${tradeSize} → ${tokensPerSide} YES + ${tokensPerSide} NO tokens | remaining balance: $${remainingBal.toFixed(2)}`,
-    );
+    this.logger.log(`[SIM] Buy filled: $${tradeSize} → ${pos.yesSharesOwned.toFixed(2)} YES & ${pos.noSharesOwned.toFixed(2)} NO | bal: $${remainingBal.toFixed(2)}`);
+    await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Buy filled: $${tradeSize} | remaining balance: $${remainingBal.toFixed(2)}`);
+    
     this.telegram.notifyMMEntry({
       isDryRun: true,
       market: pos.question,
       asset: pos.asset,
       duration: this.config.duration || '5m',
       tradeSize,
-      sellPrice: this.config.sellPrice,
+      sellPrice: (pos.targetSellYes + pos.targetSellNo) / 2, // approximation
       endTime: pos.endTime,
       balance: remainingBal,
     });
-    await this.logs.info(
-      StrategyType.MARKET_MAKER,
-      `[SIM] Watching for price ≥ $${this.config.sellPrice} on YES (${pos.yesTokenId.slice(-6)}) and NO (${pos.noTokenId.slice(-6)})`,
-    );
-
-    this.monitorFillsSim(conditionId);
+    
+    await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Listed SELL orders. Waiting for YES ≥ $${pos.targetSellYes.toFixed(3)} and NO ≥ $${pos.targetSellNo.toFixed(3)}`);
+    this.monitorFillsSim(conditionId, tradeSize);
   }
 
   // ─── Simulation fill monitoring ───────────────────────────────────────────
 
-  private monitorFillsSim(conditionId: string) {
+  private monitorFillsSim(conditionId: string, tradeSize: number) {
     const interval = setInterval(async () => {
       const pos = this.positions.get(conditionId);
       if (!pos || Date.now() > pos.endTime.getTime()) {
@@ -303,33 +384,26 @@ export class MmExecutorService {
           this.clob.getMidpoint(pos.noTokenId),
         ]);
 
-        if (!pos.yesFilled && yesMid >= this.config.sellPrice) {
-          pos.yesFilled = true;
-          const pnl = this.config.tradeSize * (this.config.sellPrice - 0.5);
-          this.logger.log(`[SIM] YES filled at $${yesMid.toFixed(4)} | est. P&L: +$${pnl.toFixed(2)}`);
-          await this.logs.info(
-            StrategyType.MARKET_MAKER,
-            `[SIM] YES filled at $${yesMid.toFixed(4)} (target $${this.config.sellPrice}) | est. P&L: +$${pnl.toFixed(2)}`,
-          );
+        if (!pos.yesSellFilled && yesMid >= pos.targetSellYes) {
+          pos.yesSellFilled = true;
+          const pnl = (pos.targetSellYes * pos.yesSharesOwned) - (tradeSize / 2); // approximate PnL math
+          this.logger.log(`[SIM] YES SELL filled at $${yesMid.toFixed(3)}`);
+          await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] YES SELL filled at $${yesMid.toFixed(3)} (target $${pos.targetSellYes.toFixed(3)})`);
         }
 
-        if (!pos.noFilled && noMid >= this.config.sellPrice) {
-          pos.noFilled = true;
-          const pnl = this.config.tradeSize * (this.config.sellPrice - 0.5);
-          this.logger.log(`[SIM] NO filled at $${noMid.toFixed(4)} | est. P&L: +$${pnl.toFixed(2)}`);
-          await this.logs.info(
-            StrategyType.MARKET_MAKER,
-            `[SIM] NO filled at $${noMid.toFixed(4)} (target $${this.config.sellPrice}) | est. P&L: +$${pnl.toFixed(2)}`,
-          );
+        if (!pos.noSellFilled && noMid >= pos.targetSellNo) {
+          pos.noSellFilled = true;
+          this.logger.log(`[SIM] NO SELL filled at $${noMid.toFixed(3)}`);
+          await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] NO SELL filled at $${noMid.toFixed(3)} (target $${pos.targetSellNo.toFixed(3)})`);
         }
 
-        if (pos.yesFilled && pos.noFilled) {
+        if (pos.yesSellFilled && pos.noSellFilled) {
           clearInterval(interval);
-          const totalPnl = 2 * this.config.tradeSize * (this.config.sellPrice - 0.5);
-          this.logger.log(`[SIM] Both sides filled — profit! est. P&L: +$${totalPnl.toFixed(2)}`);
-          await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Both sides filled — full profit! est. P&L: +$${totalPnl.toFixed(2)}`);
-          // Update DB position
-          await this.closeSimPosition(pos, totalPnl, true);
+          const revenue = (pos.targetSellYes * pos.yesSharesOwned) + (pos.targetSellNo * pos.noSharesOwned);
+          const totalPnl = revenue - tradeSize;
+          this.logger.log(`[SIM] Both SELLs filled — profit! est. P&L: +$${totalPnl.toFixed(2)}`);
+          await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Both SELLs filled! est. P&L: +$${totalPnl.toFixed(2)}`);
+          await this.closeSimPosition(pos, totalPnl, true, tradeSize);
         }
       } catch {}
     }, 5000);
@@ -345,18 +419,39 @@ export class MmExecutorService {
         return;
       }
 
-      if (pos.yesSellOrderId && !pos.yesFilled) {
-        const order = await this.clob.getOrderStatus(pos.yesSellOrderId);
+      // Track Bids
+      if (pos.yesBuyOrderId && !pos.yesBuyFilled) {
+        const order = await this.clob.getOrderStatus(pos.yesBuyOrderId);
         if (order?.status === 'MATCHED') {
-          pos.yesFilled = true;
-          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] YES sell order filled`);
+          pos.yesBuyFilled = true;
+          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] YES BUY order filled. Listing SELL...`);
+          const sell = await this.clob.placeGTCOrder(pos.yesTokenId, 'SELL', pos.targetSellYes, pos.yesSharesOwned);
+          if (sell?.id) pos.yesSellOrderId = sell.id;
         }
       }
-      if (pos.noSellOrderId && !pos.noFilled) {
+      if (pos.noBuyOrderId && !pos.noBuyFilled) {
+        const order = await this.clob.getOrderStatus(pos.noBuyOrderId);
+        if (order?.status === 'MATCHED') {
+          pos.noBuyFilled = true;
+          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO BUY order filled. Listing SELL...`);
+          const sell = await this.clob.placeGTCOrder(pos.noTokenId, 'SELL', pos.targetSellNo, pos.noSharesOwned);
+          if (sell?.id) pos.yesSellOrderId = sell.id; // Bug fix: noSellOrderId
+        }
+      }
+
+      // Track Asks
+      if (pos.yesSellOrderId && !pos.yesSellFilled) {
+        const order = await this.clob.getOrderStatus(pos.yesSellOrderId);
+        if (order?.status === 'MATCHED') {
+          pos.yesSellFilled = true;
+          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] YES SELL order filled`);
+        }
+      }
+      if (pos.noSellOrderId && !pos.noSellFilled) {
         const order = await this.clob.getOrderStatus(pos.noSellOrderId);
         if (order?.status === 'MATCHED') {
-          pos.noFilled = true;
-          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO sell order filled`);
+          pos.noSellFilled = true;
+          await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO SELL order filled`);
         }
       }
     }, 5000);
@@ -380,52 +475,41 @@ export class MmExecutorService {
   }
 
   private async cutLossSim(pos: MMPosition, timeLeft: number) {
+    const tradeSize = this.config.dynamicSizingEnabled
+      ? (pos as any)._tradeSize || this.config.tradeSize
+      : this.config.tradeSize;
+
     const [yesMid, noMid] = await Promise.all([
       this.clob.getMidpoint(pos.yesTokenId).catch(() => 0),
       this.clob.getMidpoint(pos.noTokenId).catch(() => 0),
     ]);
 
-    this.logger.log(`[SIM] Cut-loss: "${pos.question}" | ${timeLeft}s left | YES=$${yesMid.toFixed(3)} NO=$${noMid.toFixed(3)} | yesFilled=${pos.yesFilled} noFilled=${pos.noFilled}`);
-    await this.logs.info(
-      StrategyType.MARKET_MAKER,
-      `[SIM] Cut-loss check for "${pos.question}" | ${timeLeft}s left | ` +
-      `YES mid=$${yesMid.toFixed(4)} NO mid=$${noMid.toFixed(4)} | ` +
-      `YES filled=${pos.yesFilled} NO filled=${pos.noFilled}`,
-    );
+    this.logger.log(`[SIM] Cut-loss: "${pos.question}" | ${timeLeft}s left | YES=$${yesMid.toFixed(3)} NO=$${noMid.toFixed(3)} | yesSell=${pos.yesSellFilled} noSell=${pos.noSellFilled}`);
+    
+    let pnl: number = 0;
+    
+    // Simplistic P&L derivation
+    const yesRevenue = pos.yesSellFilled ? (pos.yesSharesOwned * pos.targetSellYes) : (pos.yesSharesOwned * yesMid * 0.95);
+    const noRevenue = pos.noSellFilled ? (pos.noSharesOwned * pos.targetSellNo) : (pos.noSharesOwned * noMid * 0.95);
+    
+    pnl = (yesRevenue + noRevenue) - tradeSize;
 
-    let pnl: number;
-    if (!pos.yesFilled && !pos.noFilled) {
-      pnl = -(this.config.tradeSize * 0.02); // ~2% spread cost
-      await this.logs.info(
-        StrategyType.MARKET_MAKER,
-        `[SIM] Cut-loss: neither side filled, merging back. Est. loss: $${pnl.toFixed(2)}`,
-      );
-    } else if (pos.yesFilled && !pos.noFilled) {
-      const sellAtMarket = noMid * 0.95;
-      pnl = this.config.tradeSize * (this.config.sellPrice - 0.5)
-          - this.config.tradeSize * (0.5 - sellAtMarket);
-      await this.logs.info(
-        StrategyType.MARKET_MAKER,
-        `[SIM] YES filled, NO cut-loss at $${sellAtMarket.toFixed(4)}. Est. net P&L: $${pnl.toFixed(2)}`,
-      );
-    } else if (!pos.yesFilled && pos.noFilled) {
-      const sellAtMarket = yesMid * 0.95;
-      pnl = this.config.tradeSize * (this.config.sellPrice - 0.5)
-          - this.config.tradeSize * (0.5 - sellAtMarket);
-      await this.logs.info(
-        StrategyType.MARKET_MAKER,
-        `[SIM] NO filled, YES cut-loss at $${sellAtMarket.toFixed(4)}. Est. net P&L: $${pnl.toFixed(2)}`,
-      );
+    if (!pos.yesSellFilled && !pos.noSellFilled) {
+      await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Cut-loss: neither side sold, market dumping. Est. P&L: $${pnl.toFixed(2)}`);
+    } else if (pos.yesSellFilled && !pos.noSellFilled) {
+      await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] YES sold at top, NO cut-loss. Est. net P&L: $${pnl.toFixed(2)}`);
+    } else if (!pos.yesSellFilled && pos.noSellFilled) {
+      await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] NO sold at top, YES cut-loss. Est. net P&L: $${pnl.toFixed(2)}`);
     } else {
-      pnl = 2 * this.config.tradeSize * (this.config.sellPrice - 0.5);
+      pnl = (pos.targetSellYes * pos.yesSharesOwned) + (pos.targetSellNo * pos.noSharesOwned) - tradeSize;
       await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Both sides filled — profit! P&L: +$${pnl.toFixed(2)}`);
     }
 
     (pos as any)._isCutLoss = true;
-    await this.closeSimPosition(pos, pnl, pnl >= 0);
+    await this.closeSimPosition(pos, pnl, pnl >= 0, tradeSize);
   }
 
-  private async closeSimPosition(pos: MMPosition, pnl: number, isWin: boolean) {
+  private async closeSimPosition(pos: MMPosition, pnl: number, isWin: boolean, tradeSize: number = this.config.tradeSize) {
     if (!pos.dbPositionId) return;
 
     try {
@@ -437,7 +521,7 @@ export class MmExecutorService {
       });
 
       // Credit back: original cost + P&L
-      const refund = this.config.tradeSize + pnl;
+      const refund = tradeSize + pnl;
       if (refund > 0) {
         const currentBal = await this.settings.getNumber('MM_SIM_BALANCE', 0);
         await this.settings.set('MM_SIM_BALANCE', (currentBal + refund).toFixed(2));
@@ -453,12 +537,12 @@ export class MmExecutorService {
         market: pos.question,
         asset: pos.asset,
         duration: this.config.duration || '5m',
-        tradeSize: this.config.tradeSize,
+        tradeSize: tradeSize,
         pnl,
         balance: newBal,
         isCutLoss: (pos as any)._isCutLoss ?? false,
-        yesFilled: pos.yesFilled,
-        noFilled: pos.noFilled,
+        yesFilled: pos.yesSellFilled,
+        noFilled: pos.noSellFilled,
       });
     } catch (err) {
       this.logger.error(`[SIM] Failed to close DB position: ${err.message}`);
@@ -468,27 +552,25 @@ export class MmExecutorService {
   private async cutLossLive(pos: MMPosition) {
     await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss triggered for "${pos.question}"`);
 
-    if (!pos.yesFilled && !pos.noFilled) {
-      if (pos.yesSellOrderId) await this.clob.cancelOrder(pos.yesSellOrderId);
-      if (pos.noSellOrderId) await this.clob.cancelOrder(pos.noSellOrderId);
-      const mergeTxHash = await this.ctf.mergePositions(pos.conditionId, this.config.tradeSize);
-      if (mergeTxHash) {
-        await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Merged positions back — tx: ${mergeTxHash}`);
-      } else {
-        await this.logs.error(StrategyType.MARKET_MAKER, `Merge failed for ${pos.conditionId}`);
-      }
-    } else if (pos.yesFilled && !pos.noFilled) {
-      if (pos.noSellOrderId) await this.clob.cancelOrder(pos.noSellOrderId);
-      const mid = await this.clob.getMidpoint(pos.noTokenId);
-      await this.clob.placeFOKOrder(pos.noTokenId, 'SELL', mid * 0.95, this.config.tradeSize);
-      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: sold NO at $${(mid * 0.95).toFixed(4)}`);
-    } else if (!pos.yesFilled && pos.noFilled) {
-      if (pos.yesSellOrderId) await this.clob.cancelOrder(pos.yesSellOrderId);
-      const mid = await this.clob.getMidpoint(pos.yesTokenId);
-      await this.clob.placeFOKOrder(pos.yesTokenId, 'SELL', mid * 0.95, this.config.tradeSize);
-      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: sold YES at $${(mid * 0.95).toFixed(4)}`);
-    } else {
-      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Both sides already filled — profit!`);
+    // Cancel pending RESTING BIDS
+    if (pos.yesBuyOrderId && !pos.yesBuyFilled) await this.clob.cancelOrder(pos.yesBuyOrderId);
+    if (pos.noBuyOrderId && !pos.noBuyFilled) await this.clob.cancelOrder(pos.noBuyOrderId);
+
+    // Cancel pending RESTING ASKS
+    if (pos.yesSellOrderId && !pos.yesSellFilled) await this.clob.cancelOrder(pos.yesSellOrderId);
+    if (pos.noSellOrderId && !pos.noSellFilled) await this.clob.cancelOrder(pos.noSellOrderId);
+
+    // Pure Orderbook cut-loss: FOK Sell whatever we bought
+    if (pos.yesBuyFilled && !pos.yesSellFilled) {
+      const mid = await this.clob.getMidpoint(pos.yesTokenId).catch(() => 0.05);
+      await this.clob.placeFOKOrder(pos.yesTokenId, 'SELL', mid * 0.95, pos.yesSharesOwned);
+      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold YES at ~${(mid * 0.95).toFixed(3)}`);
+    }
+    
+    if (pos.noBuyFilled && !pos.noSellFilled) {
+      const mid = await this.clob.getMidpoint(pos.noTokenId).catch(() => 0.05);
+      await this.clob.placeFOKOrder(pos.noTokenId, 'SELL', mid * 0.95, pos.noSharesOwned);
+      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold NO at ~${(mid * 0.95).toFixed(3)}`);
     }
 
     this.events.emitStatsUpdate({ type: 'MARKET_MAKER' });

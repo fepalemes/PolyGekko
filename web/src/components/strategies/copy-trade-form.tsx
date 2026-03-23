@@ -28,6 +28,9 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
     COPY_TRADE_FIXED_AMOUNT: getVal(settings, 'COPY_TRADE_FIXED_AMOUNT', '10'),
     COPY_TRADE_SIZE_PERCENT: getVal(settings, 'COPY_TRADE_SIZE_PERCENT', '10'),
     COPY_TRADE_MAX_POSITION_SIZE: getVal(settings, 'COPY_TRADE_MAX_POSITION_SIZE', '50'),
+    COPY_TRADE_DYNAMIC_SIZING_ENABLED: getVal(settings, 'COPY_TRADE_DYNAMIC_SIZING_ENABLED', 'false'),
+    COPY_TRADE_MIN_ALLOCATION: getVal(settings, 'COPY_TRADE_MIN_ALLOCATION', '5'),
+    COPY_TRADE_MAX_ALLOCATION: getVal(settings, 'COPY_TRADE_MAX_ALLOCATION', '25'),
     COPY_TRADE_MIN_ENTRY_AMOUNT: getVal(settings, 'COPY_TRADE_MIN_ENTRY_AMOUNT', '1'),
     COPY_TRADE_MAX_BALANCE_USAGE_PERCENT: getVal(settings, 'COPY_TRADE_MAX_BALANCE_USAGE_PERCENT', '30'),
     COPY_TRADE_AUTO_SELL_ENABLED: getVal(settings, 'COPY_TRADE_AUTO_SELL_ENABLED', 'true'),
@@ -63,20 +66,6 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
       </CardHeader>
       <CardContent className="space-y-5">
 
-        {/* Dry Run */}
-        <div className="flex items-center justify-between rounded-lg border border-border p-3">
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              {f.dryRun.label}
-              <HelpTooltip text={f.dryRun.help} />
-            </p>
-          </div>
-          <Switch
-            checked={form.COPY_TRADE_DRY_RUN === 'true'}
-            onCheckedChange={v => set('COPY_TRADE_DRY_RUN', v.toString())}
-          />
-        </div>
-
         {/* Trader Address */}
         <div className="space-y-1.5">
           <Label htmlFor="trader" className="flex items-center gap-1.5">
@@ -90,57 +79,99 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
           />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {/* Size Mode */}
-          <div className="space-y-1.5">
-            <Label className="flex items-center gap-1.5">
-              {f.sizeMode.label} <HelpTooltip text={f.sizeMode.help} />
-            </Label>
-            <Select value={form.COPY_TRADE_SIZE_MODE} onValueChange={v => set('COPY_TRADE_SIZE_MODE', v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="fixed">{f.sizeMode.optFixed}</SelectItem>
-                <SelectItem value="percentage">{f.sizeMode.optPercentage}</SelectItem>
-                <SelectItem value="balance">{f.sizeMode.optBalance}</SelectItem>
-              </SelectContent>
-            </Select>
+        {/* Dynamic Sizing Toggle */}
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                {t.strategies.marketMaker.fields.dynamicSizingEnabled.label} <HelpTooltip text={t.strategies.marketMaker.fields.dynamicSizingEnabled.help} />
+              </p>
+            </div>
+            <Switch
+              checked={form.COPY_TRADE_DYNAMIC_SIZING_ENABLED === 'true'}
+              onCheckedChange={v => set('COPY_TRADE_DYNAMIC_SIZING_ENABLED', v.toString())}
+            />
           </div>
-
-          {/* Fixed Amount — shown only when mode=fixed */}
-          {form.COPY_TRADE_SIZE_MODE === 'fixed' ? (
-            <div className="space-y-1.5">
-              <Label htmlFor="fixed-amt" className="flex items-center gap-1.5">
-                {f.fixedAmount.label} <HelpTooltip text={f.fixedAmount.help} />
-              </Label>
-              <Input id="fixed-amt" type="number" min="0.01" step="0.01"
-                value={form.COPY_TRADE_FIXED_AMOUNT}
-                onChange={e => set('COPY_TRADE_FIXED_AMOUNT', e.target.value)} />
-            </div>
-          ) : (
-            /* Size % — shown when mode=percentage or balance */
-            <div className="space-y-1.5">
-              <Label htmlFor="size-pct" className="flex items-center gap-1.5">
-                {f.sizePercent.label} <HelpTooltip text={f.sizePercent.help} />
-              </Label>
-              <Input id="size-pct" type="number" min="1" max="100"
-                value={form.COPY_TRADE_SIZE_PERCENT}
-                onChange={e => set('COPY_TRADE_SIZE_PERCENT', e.target.value)} />
-            </div>
-          )}
-
-          {/* Max Position (hidden in fixed mode) */}
-          {form.COPY_TRADE_SIZE_MODE !== 'fixed' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="max-pos" className="flex items-center gap-1.5">
-                {f.maxPositionSize.label} <HelpTooltip text={f.maxPositionSize.help} />
-              </Label>
-              <Input id="max-pos" type="number" min="1"
-                value={form.COPY_TRADE_MAX_POSITION_SIZE}
-                onChange={e => set('COPY_TRADE_MAX_POSITION_SIZE', e.target.value)} />
+          {form.COPY_TRADE_DYNAMIC_SIZING_ENABLED === 'true' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="min-alloc">{t.strategies.marketMaker.fields.minAllocation.label}</Label>
+                <Input
+                  id="min-alloc"
+                  type="number"
+                  min="1"
+                  value={form.COPY_TRADE_MIN_ALLOCATION}
+                  onChange={e => set('COPY_TRADE_MIN_ALLOCATION', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="max-alloc">{t.strategies.marketMaker.fields.maxAllocation.label}</Label>
+                <Input
+                  id="max-alloc"
+                  type="number"
+                  min="1"
+                  value={form.COPY_TRADE_MAX_ALLOCATION}
+                  onChange={e => set('COPY_TRADE_MAX_ALLOCATION', e.target.value)}
+                />
+              </div>
             </div>
           )}
+        </div>
 
-          {/* Min Entry Amount */}
+        {form.COPY_TRADE_DYNAMIC_SIZING_ENABLED !== 'true' && (
+          <div className="grid gap-4 sm:grid-cols-2">
+            {/* Size Mode */}
+            <div className="space-y-1.5">
+              <Label className="flex items-center gap-1.5">
+                {f.sizeMode.label} <HelpTooltip text={f.sizeMode.help} />
+              </Label>
+              <Select value={form.COPY_TRADE_SIZE_MODE} onValueChange={v => set('COPY_TRADE_SIZE_MODE', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fixed">{f.sizeMode.optFixed}</SelectItem>
+                  <SelectItem value="percentage">{f.sizeMode.optPercentage}</SelectItem>
+                  <SelectItem value="balance">{f.sizeMode.optBalance}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Fixed Amount — shown only when mode=fixed */}
+            {form.COPY_TRADE_SIZE_MODE === 'fixed' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="fixed-amt" className="flex items-center gap-1.5">
+                  {f.fixedAmount.label} <HelpTooltip text={f.fixedAmount.help} />
+                </Label>
+                <Input id="fixed-amt" type="number" min="0.01" step="0.01"
+                  value={form.COPY_TRADE_FIXED_AMOUNT}
+                  onChange={e => set('COPY_TRADE_FIXED_AMOUNT', e.target.value)} />
+              </div>
+            ) : (
+              /* Size % — shown when mode=percentage or balance */
+              <div className="space-y-1.5">
+                <Label htmlFor="size-pct" className="flex items-center gap-1.5">
+                  {f.sizePercent.label} <HelpTooltip text={f.sizePercent.help} />
+                </Label>
+                <Input id="size-pct" type="number" min="1" max="100"
+                  value={form.COPY_TRADE_SIZE_PERCENT}
+                  onChange={e => set('COPY_TRADE_SIZE_PERCENT', e.target.value)} />
+              </div>
+            )}
+
+            {/* Max Position (hidden in fixed mode) */}
+            {form.COPY_TRADE_SIZE_MODE !== 'fixed' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="max-pos" className="flex items-center gap-1.5">
+                  {f.maxPositionSize.label} <HelpTooltip text={f.maxPositionSize.help} />
+                </Label>
+                <Input id="max-pos" type="number" min="1"
+                  value={form.COPY_TRADE_MAX_POSITION_SIZE}
+                  onChange={e => set('COPY_TRADE_MAX_POSITION_SIZE', e.target.value)} />
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
             <Label htmlFor="min-entry" className="flex items-center gap-1.5">
               {f.minEntryAmount.label} <HelpTooltip text={f.minEntryAmount.help} />
@@ -175,16 +206,14 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
           </div>
 
           {/* Sim Balance */}
-          {form.COPY_TRADE_DRY_RUN === 'true' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="sim-bal" className="flex items-center gap-1.5">
-                {f.simBalance.label} <HelpTooltip text={f.simBalance.help} />
-              </Label>
-              <Input id="sim-bal" type="number" min="0"
-                value={form.COPY_TRADE_SIM_BALANCE}
-                onChange={e => set('COPY_TRADE_SIM_BALANCE', e.target.value)} />
-            </div>
-          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="sim-bal" className="flex items-center gap-1.5">
+              {f.simBalance.label} <HelpTooltip text={f.simBalance.help} />
+            </Label>
+            <Input id="sim-bal" type="number" min="0"
+              value={form.COPY_TRADE_SIM_BALANCE}
+              onChange={e => set('COPY_TRADE_SIM_BALANCE', e.target.value)} />
+          </div>
         </div>
 
         {/* Take Profit + Stop Loss */}

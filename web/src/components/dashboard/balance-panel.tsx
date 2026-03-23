@@ -5,8 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
-import { Pencil, Trash2, Loader2 } from 'lucide-react';
-import { getBalance, updateSimBalance, clearSimData } from '@/lib/api';
+import { Pencil, Loader2 } from 'lucide-react';
+import { getBalance, updateSimBalance } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { formatUSD } from '@/lib/utils';
 
@@ -15,7 +15,6 @@ export function BalancePanel({ isDryRun = true }: { isDryRun?: boolean }) {
   const { t } = useLang();
   const [editing, setEditing] = useState(false);
   const [inputVal, setInputVal] = useState('');
-  const [clearing, setClearing] = useState(false);
 
   const { data, refetch } = useQuery({
     queryKey: ['balance', isDryRun],
@@ -27,17 +26,6 @@ export function BalancePanel({ isDryRun = true }: { isDryRun?: boolean }) {
     mutationFn: (val: string) => updateSimBalance(val),
     onSuccess: () => { setEditing(false); refetch(); },
   });
-
-  const handleClearSimData = async () => {
-    if (!confirm(t.common.clearSimDataConfirm)) return;
-    setClearing(true);
-    try {
-      await clearSimData();
-      qc.invalidateQueries();
-    } finally {
-      setClearing(false);
-    }
-  };
 
   const balance   = data?.balance ?? 0;
   const ctBalance = (data as any)?.ctBalance ?? 0;
@@ -102,23 +90,6 @@ export function BalancePanel({ isDryRun = true }: { isDryRun?: boolean }) {
               <span className="font-mono text-foreground">{formatUSD(mmBalance)}</span>
             </div>
           </div>
-        )}
-
-        {/* Clear sim data */}
-        {isDryRun && (
-          <Button
-            size="sm"
-            variant="destructive"
-            className="mt-auto w-full cursor-pointer"
-            onClick={handleClearSimData}
-            disabled={clearing}
-          >
-            {clearing ? (
-              <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />{t.common.clearing}</>
-            ) : (
-              <><Trash2 className="mr-1.5 h-3.5 w-3.5" />{t.common.clearSimData}</>
-            )}
-          </Button>
         )}
       </CardContent>
     </Card>

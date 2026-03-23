@@ -34,12 +34,19 @@ export class ClobService implements OnModuleInit {
   async getBalance(): Promise<number> {
     if (!this.client) return 0;
     try {
-      const resp = await fetch(
-        `https://clob.polymarket.com/balance?address=${process.env.PROXY_WALLET_ADDRESS}`,
-      );
-      const data = await resp.json();
-      return parseFloat(data.balance || '0');
-    } catch {
+      const address = process.env.PROXY_WALLET_ADDRESS;
+      if (!address) return 0;
+      
+      const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
+      const provider = new ethers.providers.JsonRpcProvider(rpcUrl);
+      const usdcAbi = ['function balanceOf(address account) view returns (uint256)'];
+      const usdcAddress = '0x2791Bca1f2de4661ED88A30C99A7a9449Aa84174'; // USDC.e
+      const usdc = new ethers.Contract(usdcAddress, usdcAbi, provider);
+
+      const raw = await usdc.balanceOf(address);
+      return parseFloat(ethers.utils.formatUnits(raw, 6));
+    } catch (e) {
+      this.logger.warn(`Failed to fetch wallet balance: ${e.message}`);
       return 0;
     }
   }

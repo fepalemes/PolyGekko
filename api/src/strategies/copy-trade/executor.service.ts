@@ -58,6 +58,15 @@ export class ExecutorService {
 
   private async handleBuy(conditionId: string, tokenId: string, event: any) {
     try {
+      const maxPerMin = await this.settings.getGlobalMaxEntriesPerMinute();
+      if (maxPerMin > 0) {
+        const allowed = await this.positions.acquireGlobalEntry(maxPerMin, 60);
+        if (!allowed) {
+          await this.logs.warn(StrategyType.COPY_TRADE, `[RATE LIMIT] Max entries per minute (${maxPerMin}) reached — skipping`);
+          return;
+        }
+      }
+
       const existing = await this.positions.findByConditionId(conditionId);
       if (existing) return;
 
@@ -110,6 +119,14 @@ export class ExecutorService {
       await this.logs.info(StrategyType.COPY_TRADE, `BUY ${market.question} | ${shares.toFixed(2)} shares @ $${price.toFixed(4)} | $${size.toFixed(2)}`);
 
       if (this.isDryRun) {
+        const currentBalance = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
+        const minBal = await this.settings.getGlobalWalletMargin();
+        
+        if (currentBalance < size || currentBalance - size < minBal) {
+          await this.logs.warn(StrategyType.COPY_TRADE, `[SIM] Order would leave simulation balance below minimum $${minBal} — skipping (balance: $${currentBalance.toFixed(2)})`);
+          return;
+        }
+
         const pos = await this.positions.create({
           conditionId,
           tokenId,
@@ -136,8 +153,8 @@ export class ExecutorService {
         });
         await this.simStats.recordBuy(StrategyType.COPY_TRADE);
         // Deduct from sim balance
-        const currentBalance = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
-        await this.settings.set('COPY_TRADE_SIM_BALANCE', (currentBalance - size).toFixed(2));
+        const updatedBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
+        await this.settings.set('COPY_TRADE_SIM_BALANCE', (updatedBal - size).toFixed(2));
         this.events.emitPositionUpdate(pos);
         this.events.emitTradeExecuted({ side: 'BUY', market: market.question, shares, price, isDryRun: true });
         const newBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0);
@@ -152,7 +169,7 @@ export class ExecutorService {
 
       // ── Live balance guard ────────────────────────────────────────────────
       const liveBalance = await this.clob.getBalance();
-      const minLiveBal = this.config.minLiveBalance ?? 5;
+      const minLiveBal = await this.settings.getGlobalWalletMargin();
       if (liveBalance < size) {
         await this.logs.warn(StrategyType.COPY_TRADE,
           `Insufficient balance: $${liveBalance.toFixed(2)} available, need $${size.toFixed(2)} — skipping`);
@@ -372,7 +389,9 @@ export class ExecutorService {
     if (remaining <= 0) return 0;
 
     let tradeSize: number;
-    if (this.config.sizeMode === 'fixed') {
+    if (this.config.dynamicSizingEnabled) {
+      tradeSize = Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2));
+    } else if (this.config.sizeMode === 'fixed') {
       // Fixed dollar amount — always enter with exactly this amount regardless of trader's size
       tradeSize = this.config.fixedAmount;
     } else if (this.config.sizeMode === 'balance') {

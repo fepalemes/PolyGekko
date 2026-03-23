@@ -64,6 +64,13 @@ export class DetectorService {
             continue;
           }
 
+          // Skip if market is already running for more than 60 seconds (We only want completely fresh markets)
+          const timeSinceStart = now - startTs;
+          if (timeSinceStart > 60000) {
+            this.logger.warn(`[MM] Skipping "${market.question}" — market is already ${Math.round(timeSinceStart / 1000)}s old.`);
+            continue;
+          }
+
           this.activeConditionIds.add(conditionId);
 
           this.logger.log(

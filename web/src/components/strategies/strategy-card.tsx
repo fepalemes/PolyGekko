@@ -15,9 +15,10 @@ interface StrategyCardProps {
   label: string;
   description: string;
   queryKey: string[];
+  isDryRun: boolean;
 }
 
-export function StrategyCard({ status, label, description, queryKey }: StrategyCardProps) {
+export function StrategyCard({ status, label, description, queryKey, isDryRun: globalIsDryRun }: StrategyCardProps) {
   const [loading, setLoading] = useState(false);
   const qc = useQueryClient();
   const { t } = useLang();
@@ -46,7 +47,7 @@ export function StrategyCard({ status, label, description, queryKey }: StrategyC
         <CardTitle className="flex items-center justify-between text-base font-semibold text-foreground">
           {label}
           <div className="flex items-center gap-2">
-            {status.isDryRun && <Badge variant="warning">{t.common.dryRun}</Badge>}
+            {(status.running ? status.isDryRun : globalIsDryRun) && <Badge variant="warning">{t.common.dryRun}</Badge>}
             <Badge variant={status.running ? 'success' : 'secondary'}>
               {status.running ? t.common.running : t.common.stopped}
             </Badge>

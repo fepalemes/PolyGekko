@@ -34,6 +34,12 @@ export function MarketMakerForm({ settings, onSaved }: { settings: Setting[]; on
     MM_RECOVERY_THRESHOLD: getVal(settings, 'MM_RECOVERY_THRESHOLD', '0.70'),
     MM_POLL_INTERVAL: getVal(settings, 'MM_POLL_INTERVAL', '30'),
     MM_SIM_BALANCE: getVal(settings, 'MM_SIM_BALANCE', '1000'),
+    MM_DYNAMIC_SIZING_ENABLED: getVal(settings, 'MM_DYNAMIC_SIZING_ENABLED', 'false'),
+    MM_MIN_ALLOCATION: getVal(settings, 'MM_MIN_ALLOCATION', '5'),
+    MM_MAX_ALLOCATION: getVal(settings, 'MM_MAX_ALLOCATION', '50'),
+    MM_SPREAD_PROFIT_TARGET: getVal(settings, 'MM_SPREAD_PROFIT_TARGET', '0.01'),
+    MM_BINANCE_TREND_ENABLED: getVal(settings, 'MM_BINANCE_TREND_ENABLED', 'false'),
+    MM_MAX_BIAS_PERCENT: getVal(settings, 'MM_MAX_BIAS_PERCENT', '80'),
   });
 
   const set = (key: string, value: string) => setForm(f => ({ ...f, [key]: value }));
@@ -58,20 +64,6 @@ export function MarketMakerForm({ settings, onSaved }: { settings: Setting[]; on
         <p className="text-xs text-muted-foreground leading-relaxed">{t.strategies.marketMaker.description}</p>
       </CardHeader>
       <CardContent className="space-y-5">
-
-        {/* Dry Run */}
-        <div className="flex items-center justify-between rounded-lg border border-border p-3">
-          <div>
-            <p className="flex items-center gap-1.5 text-sm font-medium">
-              {t.strategies.copyTrade.fields.dryRun.label}
-              <HelpTooltip text={t.strategies.copyTrade.fields.dryRun.help} />
-            </p>
-          </div>
-          <Switch
-            checked={form.MM_DRY_RUN === 'true'}
-            onCheckedChange={v => set('MM_DRY_RUN', v.toString())}
-          />
-        </div>
 
         {/* Assets Toggle Grid */}
         {(() => {
@@ -186,6 +178,85 @@ export function MarketMakerForm({ settings, onSaved }: { settings: Setting[]; on
           </div>
         </div>
 
+        {/* Dynamic Sizing */}
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                {f.dynamicSizingEnabled.label} <HelpTooltip text={f.dynamicSizingEnabled.help} />
+              </p>
+            </div>
+            <Switch
+              checked={form.MM_DYNAMIC_SIZING_ENABLED === 'true'}
+              onCheckedChange={v => set('MM_DYNAMIC_SIZING_ENABLED', v.toString())}
+            />
+          </div>
+          {form.MM_DYNAMIC_SIZING_ENABLED === 'true' && (
+            <div className="grid gap-4 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="min-alloc">{f.minAllocation.label}</Label>
+                <Input
+                  id="min-alloc"
+                  type="number"
+                  min="1"
+                  value={form.MM_MIN_ALLOCATION}
+                  onChange={e => set('MM_MIN_ALLOCATION', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="max-alloc">{f.maxAllocation.label}</Label>
+                <Input
+                  id="max-alloc"
+                  type="number"
+                  min="1"
+                  value={form.MM_MAX_ALLOCATION}
+                  onChange={e => set('MM_MAX_ALLOCATION', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="profit-tgt">Spread Target</Label>
+                <Input
+                  id="profit-tgt"
+                  type="number"
+                  min="0.01" step="0.01"
+                  value={form.MM_SPREAD_PROFIT_TARGET}
+                  onChange={e => set('MM_SPREAD_PROFIT_TARGET', e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Binance Trend Sizing */}
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                Binance Trend Bias <HelpTooltip text="Use Binance 24h momentum API to allocate more money to the trending side" />
+              </p>
+            </div>
+            <Switch
+              checked={form.MM_BINANCE_TREND_ENABLED === 'true'}
+              onCheckedChange={v => set('MM_BINANCE_TREND_ENABLED', v.toString())}
+            />
+          </div>
+          {form.MM_BINANCE_TREND_ENABLED === 'true' && (
+            <div className="grid gap-4 sm:grid-cols-1">
+              <div className="space-y-1.5">
+                <Label htmlFor="max-bias">Max Bias Allocation %</Label>
+                <Input
+                  id="max-bias"
+                  type="number"
+                  min="50" max="100"
+                  value={form.MM_MAX_BIAS_PERCENT}
+                  onChange={e => set('MM_MAX_BIAS_PERCENT', e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">If 80%, places up to 80% capital on YES and 20% on NO based on strong momentum.</p>
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* Adaptive Cut-Loss */}
         <div className="space-y-3 rounded-lg border border-border p-3">
           <div className="flex items-center justify-between">
@@ -241,21 +312,19 @@ export function MarketMakerForm({ settings, onSaved }: { settings: Setting[]; on
         </div>
 
         {/* Sim Balance */}
-        {form.MM_DRY_RUN === 'true' && (
-          <div className="space-y-1.5">
-            <Label htmlFor="sim-balance" className="flex items-center gap-1.5">
-              {f.simBalance.label} <HelpTooltip text={f.simBalance.help} />
-            </Label>
-            <Input
-              id="sim-balance"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.MM_SIM_BALANCE}
-              onChange={e => set('MM_SIM_BALANCE', e.target.value)}
-            />
-          </div>
-        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="sim-balance" className="flex items-center gap-1.5">
+            {f.simBalance.label} <HelpTooltip text={f.simBalance.help} />
+          </Label>
+          <Input
+            id="sim-balance"
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.MM_SIM_BALANCE}
+            onChange={e => set('MM_SIM_BALANCE', e.target.value)}
+          />
+        </div>
 
         <Button onClick={save} disabled={saving} className="w-full">
           {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}

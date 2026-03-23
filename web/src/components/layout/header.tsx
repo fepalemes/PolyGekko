@@ -2,12 +2,20 @@
 import { useEffect, useState } from 'react';
 import { getSocket } from '@/lib/socket';
 import { useLang, type Lang } from '@/lib/i18n';
+import { Switch } from '@/components/ui/switch';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
+import { Trash2, Loader2 } from 'lucide-react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getSettingsByCategory, updateSetting, getRealBalance, clearSimData, getStrategiesStatus } from '@/lib/api';
 
 export function Header({ title }: { title: string }) {
   const [connected, setConnected] = useState(false);
   const [time, setTime] = useState('');
+  const [clearing, setClearing] = useState(false);
   const { lang, setLang, t } = useLang();
+  const qc = useQueryClient();
 
   useEffect(() => {
     const socket = getSocket();
@@ -26,12 +34,92 @@ export function Header({ title }: { title: string }) {
     };
   }, []);
 
+  const handleClearSimData = async () => {
+    if (!confirm(t.common.clearSimDataConfirm)) return;
+    setClearing(true);
+    try {
+      await clearSimData();
+      qc.invalidateQueries();
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  const { data: settings = [] } = useQuery({
+    queryKey: ['settings', 'system'],
+    queryFn: () => getSettingsByCategory('system'),
+  });
+
+  const simModeSetting = settings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
+  const isSimMode = simModeSetting ? simModeSetting.value === 'true' : true;
+
+  const { mutate: toggleSimMode } = useMutation({
+    mutationFn: (val: boolean) => updateSetting('GLOBAL_SIMULATION_MODE', val.toString()),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['settings'] });
+      qc.invalidateQueries({ queryKey: ['balance'] });
+    }
+  });
+
+  const { data: realBalance } = useQuery({
+    queryKey: ['balance', 'real'],
+    queryFn: async () => {
+      try {
+        const { balance } = await getRealBalance();
+        return balance;
+      } catch {
+        return 0;
+      }
+    },
+    refetchInterval: 10000,
+  });
+
+  const { data: statuses = [] } = useQuery({
+    queryKey: ['strategies'],
+    queryFn: getStrategiesStatus,
+    refetchInterval: 5000,
+  });
+  const anyRunning = statuses.some((s: any) => s.running);
+
   const toggleLang = () => setLang(lang === 'en' ? 'pt' : 'en');
 
   return (
     <div className="flex h-14 items-center justify-between border-b border-border px-6">
       <h1 className="text-base font-semibold text-foreground">{title}</h1>
       <div className="flex items-center gap-4">
+        {/* Simulation / Live Toggle & Clear button */}
+        <div className="flex items-center gap-2 border-r border-border pr-4">
+          {isSimMode && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-red-500 hover:text-red-600 hover:bg-red-500/10 h-7 text-xs px-2 cursor-pointer shadow-none"
+              onClick={handleClearSimData}
+              disabled={clearing}
+              title={t.common.clearSimData}
+            >
+              {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </Button>
+          )}
+          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
+            {t.header.simMode}
+            <HelpTooltip text={anyRunning ? (lang === 'pt' ? 'Pare todas as estratégias para mudar de modo' : 'Stop all strategies to change mode') : t.header.simModeHelp} />
+          </Label>
+          <Switch checked={isSimMode} onCheckedChange={toggleSimMode} disabled={anyRunning || clearing} />
+          {isSimMode ? (
+            <span className="text-xs font-semibold text-yellow-500 bg-yellow-500/10 px-1.5 py-0.5 rounded uppercase">{t.common.dryRun}</span>
+          ) : (
+            <span className="text-xs font-semibold text-green-500 bg-green-500/10 px-1.5 py-0.5 rounded uppercase">{t.common.live}</span>
+          )}
+        </div>
+
+        {/* Real Balance display */}
+        {!isSimMode && realBalance !== undefined && (
+          <div className="flex items-center gap-1.5 text-xs font-medium text-foreground border-r border-border pr-4 leading-none">
+             Polymarket: <span className="text-green-500">${realBalance.toFixed(2)}</span>
+          </div>
+        )}
+
         {/* Language switcher */}
         <button
           onClick={toggleLang}

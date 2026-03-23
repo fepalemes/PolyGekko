@@ -37,6 +37,22 @@ export class PositionsService {
     });
   }
 
+  private entryTimestamps: number[] = [];
+
+  async acquireGlobalEntry(limit: number, seconds: number = 60): Promise<boolean> {
+    if (limit <= 0) return true;
+    const now = Date.now();
+    const cutoff = now - seconds * 1000;
+    this.entryTimestamps = this.entryTimestamps.filter(t => t > cutoff);
+    
+    if (this.entryTimestamps.length >= limit) {
+      return false;
+    }
+    
+    this.entryTimestamps.push(now);
+    return true;
+  }
+
   async create(data: {
     conditionId: string;
     tokenId: string;

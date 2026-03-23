@@ -12,7 +12,7 @@ import { useLang } from '@/lib/i18n';
 import { cn } from '@/lib/utils';
 import type { StrategyStatus } from '@/lib/types';
 
-export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }) {
+export function StrategyStatusCards({ statuses, isDryRun: globalIsDryRun }: { statuses: StrategyStatus[], isDryRun: boolean }) {
   const [loading, setLoading] = useState<string | null>(null);
   const qc = useQueryClient();
   const { t } = useLang();
@@ -80,6 +80,7 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
           if (!meta) return null;
           const Icon = meta.icon;
           const isLoading = loading === status.type;
+          const isSimulated = status.running ? status.isDryRun : globalIsDryRun;
 
           return (
             <Card
@@ -111,7 +112,7 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
                       <Badge variant={status.running ? 'success' : 'secondary'}>
                         {status.running ? t.common.running : t.common.stopped}
                       </Badge>
-                      {status.isDryRun && (
+                      {isSimulated && (
                         <Badge variant="warning">{t.common.dryRun}</Badge>
                       )}
                     </div>

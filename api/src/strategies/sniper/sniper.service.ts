@@ -30,7 +30,7 @@ export class SniperService {
   async start() {
     if (this.running) return { message: 'Already running' };
     const config = await this.settings.getSniperConfig();
-    this.isDryRun = await this.settings.getBool('SNIPER_DRY_RUN', true);
+    this.isDryRun = await this.settings.isGlobalSimulationMode();
     this.running = true;
     this.startedAt = new Date();
 

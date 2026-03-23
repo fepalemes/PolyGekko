@@ -9,7 +9,7 @@ import { SimStatsPanel } from '@/components/dashboard/sim-stats-panel';
 import { BalancePanel } from '@/components/dashboard/balance-panel';
 import { WinLossChart } from '@/components/dashboard/win-loss-chart';
 import { AllocationChart } from '@/components/dashboard/allocation-chart';
-import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance } from '@/lib/api';
+import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance, getSettingsByCategory } from '@/lib/api';
 import { useSocketEvents } from '@/hooks/use-socket-events';
 
 export default function DashboardPage() {
@@ -40,9 +40,14 @@ export default function DashboardPage() {
     queryFn: () => getTrades({ limit: '50' }),
     refetchInterval: 15000,
   });
+  const { data: settings = [] } = useQuery({
+    queryKey: ['settings', 'system'],
+    queryFn: () => getSettingsByCategory('system'),
+    refetchInterval: 30000,
+  });
 
-  const copyTradeStatus = statuses.find(s => s.type === 'COPY_TRADE');
-  const isDryRun = copyTradeStatus?.isDryRun !== false;
+  const simModeSetting = settings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
+  const isDryRun = simModeSetting ? simModeSetting.value === 'true' : true;
 
   return (
     <MainLayout title="Dashboard">
@@ -50,13 +55,13 @@ export default function DashboardPage() {
         {/* Row 1: Stats + Balance */}
         <div className="grid gap-5 lg:grid-cols-4">
           <div className="lg:col-span-3">
-            <StatsCards simStats={simStats} positions={positions} tradesCount={trades.length} />
+            <StatsCards simStats={simStats} positions={positions} tradesCount={trades.length} isDryRun={isDryRun} />
           </div>
           <BalancePanel isDryRun={isDryRun} />
         </div>
 
         {/* Row 2: Strategy status */}
-        <StrategyStatusCards statuses={statuses} />
+        <StrategyStatusCards statuses={statuses} isDryRun={isDryRun} />
 
         {/* Row 3: Performance + Recent Activity */}
         <div className="grid gap-5 lg:grid-cols-2">
@@ -64,14 +69,19 @@ export default function DashboardPage() {
           <RecentActivity trades={trades} />
         </div>
 
-        {/* Row 4: Win/Loss breakdown + Capital Allocation */}
-        <div className="grid gap-5 lg:grid-cols-2">
-          <WinLossChart simStats={simStats} />
-          <AllocationChart positions={positions} />
-        </div>
+        {/* Conditionally render Simulation parts */}
+        {isDryRun && (
+          <>
+            {/* Row 4: Win/Loss breakdown + Capital Allocation */}
+            <div className="grid gap-5 lg:grid-cols-2">
+              <WinLossChart simStats={simStats} />
+              <AllocationChart positions={positions} />
+            </div>
 
-        {/* Row 5: Sim stats per strategy */}
-        <SimStatsPanel simStats={simStats} />
+            {/* Row 5: Sim stats per strategy */}
+            <SimStatsPanel simStats={simStats} />
+          </>
+        )}
       </div>
     </MainLayout>
   );
