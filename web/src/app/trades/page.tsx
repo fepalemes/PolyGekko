@@ -10,8 +10,14 @@ import { formatUSD, truncate, strategyLabel } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useLang } from '@/lib/i18n';
 
-const sideColors = { BUY: 'success', SELL: 'destructive' } as const;
-const statusColors = { FILLED: 'success', PENDING: 'warning', CANCELLED: 'secondary', FAILED: 'destructive' } as const;
+const sideColors    = { BUY: 'success', SELL: 'destructive' } as const;
+const statusColors  = { FILLED: 'success', PENDING: 'warning', CANCELLED: 'secondary', FAILED: 'destructive' } as const;
+const statusDots: Record<string, string> = {
+  FILLED:    'bg-green-400',
+  PENDING:   'bg-yellow-400',
+  CANCELLED: 'bg-slate-400',
+  FAILED:    'bg-red-400',
+};
 
 export default function TradesPage() {
   const [filterStrategy, setFilterStrategy] = useState('ALL');
@@ -29,9 +35,14 @@ export default function TradesPage() {
     refetchInterval: 15000,
   });
 
+  const buysCount  = trades.filter(tr => tr.side === 'BUY').length;
+  const sellsCount = trades.filter(tr => tr.side === 'SELL').length;
+  const totalCost  = trades.reduce((sum, tr) => sum + parseFloat(tr.cost || '0'), 0);
+
   return (
     <MainLayout title={tr.title}>
       <div className="space-y-4">
+        {/* Filter bar + summary */}
         <div className="flex flex-wrap items-center gap-2">
           <Select value={filterStrategy} onValueChange={setFilterStrategy}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>
@@ -50,19 +61,44 @@ export default function TradesPage() {
               <SelectItem value="SELL">Sell</SelectItem>
             </SelectContent>
           </Select>
-          <span className="ml-auto text-sm text-muted-foreground">{trades.length} {tr.title.toLowerCase()}</span>
+
+          <div className="ml-auto flex items-center gap-3 text-xs text-muted-foreground">
+            {buysCount > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
+                {buysCount} buys
+              </span>
+            )}
+            {sellsCount > 0 && (
+              <span className="flex items-center gap-1">
+                <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+                {sellsCount} sells
+              </span>
+            )}
+            {totalCost > 0 && (
+              <span className="font-mono text-foreground">{formatUSD(totalCost)} volume</span>
+            )}
+          </div>
         </div>
 
         <Card>
           <CardContent className="p-0">
             {isLoading ? (
-              <p className="py-12 text-center text-sm text-muted-foreground">{t.common.loading}</p>
+              <div className="space-y-0 divide-y divide-border">
+                {Array.from({ length: 5 }).map((_, i) => (
+                  <div key={i} className="flex items-center gap-4 px-4 py-3">
+                    <div className="h-3 w-2/5 animate-pulse rounded bg-secondary" />
+                    <div className="h-3 w-1/5 animate-pulse rounded bg-secondary" />
+                    <div className="ml-auto h-3 w-1/6 animate-pulse rounded bg-secondary" />
+                  </div>
+                ))}
+              </div>
             ) : trades.length === 0 ? (
-              <p className="py-12 text-center text-sm text-muted-foreground">{tr.noTrades}</p>
+              <p className="py-16 text-center text-sm text-muted-foreground">{tr.noTrades}</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
+                  <thead className="sticky top-0 z-10 bg-card">
                     <tr className="border-b border-border text-left text-xs text-muted-foreground">
                       <th className="px-4 py-3 font-medium">{tr.market}</th>
                       <th className="px-4 py-3 font-medium">{tr.side}</th>
@@ -76,7 +112,7 @@ export default function TradesPage() {
                   </thead>
                   <tbody className="divide-y divide-border">
                     {trades.map(trade => (
-                      <tr key={trade.id} className="hover:bg-secondary/30 transition-colors">
+                      <tr key={trade.id} className="transition-colors hover:bg-secondary/20">
                         <td className="px-4 py-2.5">
                           <span>{truncate(trade.market, 42)}</span>
                           {trade.isDryRun && <Badge variant="warning" className="ml-2 text-[10px]">{t.common.simulated}</Badge>}
@@ -88,7 +124,10 @@ export default function TradesPage() {
                         <td className="px-4 py-2.5 text-right font-mono">${parseFloat(trade.price).toFixed(4)}</td>
                         <td className="px-4 py-2.5 text-right font-mono">{formatUSD(trade.cost)}</td>
                         <td className="px-4 py-2.5">
-                          <Badge variant={statusColors[trade.status as keyof typeof statusColors] || 'secondary'}>{trade.status}</Badge>
+                          <div className="flex items-center gap-1.5">
+                            <span className={`h-1.5 w-1.5 rounded-full ${statusDots[trade.status] || 'bg-slate-400'}`} />
+                            <Badge variant={statusColors[trade.status as keyof typeof statusColors] || 'secondary'}>{trade.status}</Badge>
+                          </div>
                         </td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">{strategyLabel(trade.strategyType)}</td>
                         <td className="px-4 py-2.5 text-xs text-muted-foreground">

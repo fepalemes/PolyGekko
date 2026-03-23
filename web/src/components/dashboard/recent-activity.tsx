@@ -14,21 +14,21 @@ export function RecentActivity({ trades }: { trades: Trade[] }) {
   const ra = t.recentActivity;
 
   return (
-    <Card>
+    <Card className="flex flex-col">
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           {ra.title} <HelpTooltip text={ra.help} />
         </CardTitle>
       </CardHeader>
-      <CardContent className="p-0">
+      <CardContent className="flex-1 p-0">
         {trades.length === 0 ? (
-          <p className="px-4 py-6 text-center text-sm text-muted-foreground">{ra.noActivity}</p>
+          <p className="px-4 py-12 text-center text-sm text-muted-foreground">{ra.noActivity}</p>
         ) : (
           <div className="divide-y divide-border">
             {trades.slice(0, 10).map(trade => (
-              <div key={trade.id} className="flex items-center justify-between px-4 py-2.5">
+              <div key={trade.id} className="flex items-center justify-between px-4 py-2.5 transition-colors hover:bg-secondary/15">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm text-foreground">{truncate(trade.market, 45)}</p>
+                  <p className="truncate text-sm text-foreground">{truncate(trade.market, 40)}</p>
                   <p className="text-xs text-muted-foreground">
                     {formatDistanceToNow(new Date(trade.createdAt), { addSuffix: true })}
                     {' · '}
@@ -41,7 +41,7 @@ export function RecentActivity({ trades }: { trades: Trade[] }) {
                     {trade.side}
                   </Badge>
                   <div>
-                    <p className="font-mono text-sm font-medium">{formatUSD(trade.cost)}</p>
+                    <p className="font-mono text-sm font-semibold text-foreground">{formatUSD(trade.cost)}</p>
                     <p className="font-mono text-xs text-muted-foreground">@ ${parseFloat(trade.price).toFixed(4)}</p>
                   </div>
                 </div>

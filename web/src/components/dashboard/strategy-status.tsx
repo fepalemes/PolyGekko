@@ -9,6 +9,7 @@ import { startStrategy, stopStrategy } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { useLang } from '@/lib/i18n';
+import { cn } from '@/lib/utils';
 import type { StrategyStatus } from '@/lib/types';
 
 export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }) {
@@ -21,19 +22,31 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
       label: t.strategies.copyTrade.label,
       description: t.strategies.copyTrade.description,
       howItWorks: t.strategies.copyTrade.howItWorks,
-      icon: Copy, color: 'text-blue-400', bg: 'bg-blue-400/10',
+      icon: Copy,
+      color: 'text-blue-400',
+      bg: 'bg-blue-400/10',
+      ring: 'ring-blue-500/20',
+      runningBorder: 'border-green-500/30',
     },
     MARKET_MAKER: {
       label: t.strategies.marketMaker.label,
       description: t.strategies.marketMaker.description,
       howItWorks: t.strategies.marketMaker.howItWorks,
-      icon: BarChart2, color: 'text-purple-400', bg: 'bg-purple-400/10',
+      icon: BarChart2,
+      color: 'text-purple-400',
+      bg: 'bg-purple-400/10',
+      ring: 'ring-purple-500/20',
+      runningBorder: 'border-green-500/30',
     },
     SNIPER: {
       label: t.strategies.sniper.label,
       description: t.strategies.sniper.description,
       howItWorks: t.strategies.sniper.howItWorks,
-      icon: Crosshair, color: 'text-orange-400', bg: 'bg-orange-400/10',
+      icon: Crosshair,
+      color: 'text-orange-400',
+      bg: 'bg-orange-400/10',
+      ring: 'ring-orange-500/20',
+      runningBorder: 'border-green-500/30',
     },
   };
 
@@ -58,7 +71,7 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">{t.strategies.title}</h2>
+        <h2 className="section-label">{t.strategies.title}</h2>
         <HelpTooltip text={t.strategies.modeHelp} />
       </div>
       <div className="grid gap-4 sm:grid-cols-3">
@@ -69,21 +82,32 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
           const isLoading = loading === status.type;
 
           return (
-            <Card key={status.type}>
+            <Card
+              key={status.type}
+              className={cn(
+                'transition-all duration-200',
+                status.running
+                  ? `border-green-500/25 bg-green-500/[0.03]`
+                  : 'card-hover',
+              )}
+            >
               <CardHeader className="pb-2">
-                <CardTitle className="flex items-center gap-2 text-sm">
-                  <div className={`rounded p-1 ${meta.bg}`}>
-                    <Icon className={`h-3.5 w-3.5 ${meta.color}`} />
+                <CardTitle className="flex items-center gap-2">
+                  <div className={cn('rounded-md p-1.5 ring-1', meta.bg, meta.ring)}>
+                    <Icon className={cn('h-3.5 w-3.5', meta.color)} />
                   </div>
                   <span>{meta.label}</span>
                   <HelpTooltip text={meta.howItWorks} />
+                  {status.running && (
+                    <span className="ml-auto h-2 w-2 rounded-full bg-green-400 pulse-ring" />
+                  )}
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-3">
                 <p className="text-xs leading-relaxed text-muted-foreground">{meta.description}</p>
                 <div className="flex items-center justify-between">
                   <div className="space-y-1">
-                    <div className="flex items-center gap-1">
+                    <div className="flex items-center gap-1.5">
                       <Badge variant={status.running ? 'success' : 'secondary'}>
                         {status.running ? t.common.running : t.common.stopped}
                       </Badge>
@@ -102,6 +126,7 @@ export function StrategyStatusCards({ statuses }: { statuses: StrategyStatus[] }
                     variant={status.running ? 'destructive' : 'default'}
                     onClick={() => toggle(status)}
                     disabled={isLoading}
+                    className="cursor-pointer"
                   >
                     {isLoading ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
