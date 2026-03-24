@@ -4,21 +4,26 @@ import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { formatUSD } from '@/lib/utils';
 import { useLang } from '@/lib/i18n';
 import type { SimStats, Position } from '@/lib/types';
+import type { PolyPortfolio } from '@/lib/api';
 
 interface StatsCardsProps {
   simStats: SimStats[];
   positions: Position[];
   tradesCount: number;
   isDryRun?: boolean;
+  polyPortfolio?: PolyPortfolio;
 }
 
-export function StatsCards({ simStats, positions, tradesCount, isDryRun = true }: StatsCardsProps) {
+export function StatsCards({ simStats, positions, tradesCount, isDryRun = true, polyPortfolio }: StatsCardsProps) {
   const { t } = useLang();
-  const totalPnl = simStats.reduce((sum, s) => sum + parseFloat(s.pnl || '0'), 0);
-  const totalWins = simStats.reduce((sum, s) => sum + s.wins, 0);
-  const totalLosses = simStats.reduce((sum, s) => sum + s.losses, 0);
-  const winRate = totalWins + totalLosses > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0;
-  const openPositions = positions.filter(p => p.status === 'OPEN').length;
+
+  // Live mode: use real Polymarket data; sim mode: use local simStats
+  const totalPnl = polyPortfolio ? polyPortfolio.totalPnl : simStats.reduce((sum, s) => sum + parseFloat(s.pnl || '0'), 0);
+  const totalWins = polyPortfolio ? Math.round(polyPortfolio.winRate / 100 * polyPortfolio.totalTrades) : simStats.reduce((sum, s) => sum + s.wins, 0);
+  const totalLosses = polyPortfolio ? polyPortfolio.totalTrades - totalWins : simStats.reduce((sum, s) => sum + s.losses, 0);
+  const winRate = polyPortfolio ? polyPortfolio.winRate : (totalWins + totalLosses > 0 ? (totalWins / (totalWins + totalLosses)) * 100 : 0);
+  const openPositions = polyPortfolio ? polyPortfolio.openPositions : positions.filter(p => p.status === 'OPEN').length;
+  const resolvedCount = polyPortfolio ? polyPortfolio.totalTrades : totalWins + totalLosses;
   const pnlPositive = totalPnl >= 0;
   const d = t.dashboard;
 
@@ -68,7 +73,7 @@ export function StatsCards({ simStats, positions, tradesCount, isDryRun = true }
           {winRate.toFixed(1)}%
         </span>
       ),
-      sub: `${totalWins + totalLosses} ${d.resolvedMarkets}`,
+      sub: `${resolvedCount} ${d.resolvedMarkets}`,
       accent: winRate >= 50 ? 'border-l-green-500/40' : 'border-l-orange-500/40',
     },
   ];

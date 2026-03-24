@@ -10,7 +10,7 @@ import { BalancePanel } from '@/components/dashboard/balance-panel';
 import { WinLossChart } from '@/components/dashboard/win-loss-chart';
 import { AllocationChart } from '@/components/dashboard/allocation-chart';
 import { ConnectionHealth } from '@/components/dashboard/connection-health';
-import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance } from '@/lib/api';
+import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance, getPolyPortfolio, getPolyActivity } from '@/lib/api';
 import { useSocketEvents } from '@/hooks/use-socket-events';
 import { useSimMode } from '@/hooks/use-sim-mode';
 
@@ -45,6 +45,20 @@ export default function DashboardPage() {
     refetchInterval: 15000,
   });
 
+  // Live mode: real portfolio data from Polymarket data API
+  const { data: polyPortfolio } = useQuery({
+    queryKey: ['poly-portfolio'],
+    queryFn: getPolyPortfolio,
+    enabled: !isDryRun,
+    refetchInterval: 20000,
+  });
+  const { data: polyActivity = [] } = useQuery({
+    queryKey: ['poly-activity'],
+    queryFn: () => getPolyActivity(100),
+    enabled: !isDryRun,
+    refetchInterval: 20000,
+  });
+
   return (
     <MainLayout title="Dashboard">
       <div className="space-y-5">
@@ -54,7 +68,13 @@ export default function DashboardPage() {
         {/* Row 1: Stats + Balance */}
         <div className="grid gap-5 lg:grid-cols-4">
           <div className="lg:col-span-3">
-            <StatsCards simStats={simStats} positions={positions} tradesCount={trades.length} isDryRun={isDryRun} />
+            <StatsCards
+            simStats={simStats}
+            positions={positions}
+            tradesCount={trades.length}
+            isDryRun={isDryRun}
+            polyPortfolio={isDryRun ? undefined : polyPortfolio}
+          />
           </div>
           <BalancePanel isDryRun={isDryRun} />
         </div>
@@ -64,8 +84,8 @@ export default function DashboardPage() {
 
         {/* Row 3: Performance + Recent Activity */}
         <div className="grid gap-5 lg:grid-cols-2">
-          <PerformanceChart samples={performance} />
-          <RecentActivity trades={trades} />
+          <PerformanceChart samples={performance} polyActivity={isDryRun ? [] : polyActivity} isDryRun={isDryRun} />
+          <RecentActivity trades={trades} polyActivity={isDryRun ? [] : polyActivity} isDryRun={isDryRun} />
         </div>
 
         {/* Conditionally render Simulation parts */}

@@ -1,5 +1,6 @@
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ClobClient, Side, OrderType } from '@polymarket/clob-client';
+import { SignatureType } from '@polymarket/order-utils';
 import { ethers } from 'ethers';
 
 @Injectable()
@@ -18,10 +19,46 @@ export class ClobService implements OnModuleInit {
         this.logger.warn('PRIVATE_KEY not set – CLOB client not initialized');
         return;
       }
-      const wallet = new ethers.Wallet(privateKey);
-      this.client = new ClobClient('https://clob.polymarket.com', 137, wallet);
-      await this.client.deriveApiKey();
-      this.logger.log('CLOB client initialized');
+
+      const proxyAddress = process.env.PROXY_WALLET_ADDRESS_MAIN;
+      if (!proxyAddress) {
+        this.logger.warn('PROXY_WALLET_ADDRESS_MAIN not set – CLOB client not initialized');
+        return;
+      }
+
+      // SIGNATURE_TYPE: 0=EOA, 1=POLY_PROXY (standard proxy), 2=POLY_GNOSIS_SAFE (relayer/Safe)
+      const sigTypeEnv = parseInt(process.env.SIGNATURE_TYPE ?? '1', 10);
+      const signatureType: SignatureType = [0, 1, 2].includes(sigTypeEnv)
+        ? (sigTypeEnv as SignatureType)
+        : SignatureType.POLY_PROXY;
+
+      // Normalize: strip 0x prefix if present, left-pad to 64 hex chars, then re-add 0x
+      // (Polymarket relayer may return a 63-char key missing a leading zero)
+      const hexKey = privateKey.startsWith('0x') ? privateKey.slice(2) : privateKey;
+      const normalizedKey = `0x${hexKey.padStart(64, '0')}`;
+      const wallet = new ethers.Wallet(normalizedKey);
+      // Step 1: temp client (no creds) to derive/create the API key
+      // Per clob-client issue #202: derive first, create only if key is missing
+      const tempClient = new ClobClient('https://clob.polymarket.com', 137, wallet, undefined, signatureType, proxyAddress);
+      let rawCreds = await tempClient.deriveApiKey() as any;
+      if (!rawCreds.key) {
+        this.logger.log('No existing API key for nonce 0 — creating new one');
+        rawCreds = await tempClient.createApiKey() as any;
+      }
+
+      // SDK returns .key but ClobClient uses .apiKey internally for authenticated requests
+      // Pass both fields to satisfy all internal checks (issue #202)
+      const resolvedKey = rawCreds.key ?? rawCreds.apiKey;
+      const creds = {
+        key: resolvedKey,
+        apiKey: resolvedKey,
+        secret: rawCreds.secret,
+        passphrase: rawCreds.passphrase,
+      };
+
+      // Step 2: real client with credentials attached
+      this.client = new ClobClient('https://clob.polymarket.com', 137, wallet, creds, signatureType, proxyAddress);
+      this.logger.log(`CLOB client initialized (signatureType=${SignatureType[signatureType]}, proxy=${proxyAddress}, apiKey=${creds.key?.slice(0, 8)}...)`);
     } catch (err) {
       this.logger.error(`Failed to init CLOB client: ${err.message}`);
     }
@@ -47,7 +84,7 @@ export class ClobService implements OnModuleInit {
   async getBalance(): Promise<number> {
     if (!this.client) return 0;
     try {
-      const address = process.env.PROXY_WALLET_ADDRESS;
+      const address = process.env.PROXY_WALLET_ADDRESS_MAIN;
       if (!address) return 0;
       
       const rpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';

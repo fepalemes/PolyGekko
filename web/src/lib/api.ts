@@ -100,6 +100,38 @@ export const runBacktest = (params: {
 
 export const getRealBalance = () =>
   apiFetch<{ balance: number }>('/polymarket/balance');
+
+// Polymarket live data (real on-chain activity)
+export type PolyPortfolio = {
+  totalValue: number;
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  openPositions: number;
+  totalTrades: number;
+  winRate: number;
+};
+export type PolyActivity = {
+  timestamp: number;
+  conditionId: string;
+  transactionHash?: string;
+  type: 'TRADE' | 'REDEEM';
+  size: number;
+  usdcSize: number;
+  price: number;
+  asset: string;
+  side: 'BUY' | 'SELL' | '';
+  title: string;
+  outcome: string;
+  icon: string;
+  slug: string;
+};
+export const getPolyPortfolio = () =>
+  apiFetch<PolyPortfolio>('/polymarket/portfolio');
+export const getPolyActivity = (limit = 100) =>
+  apiFetch<PolyActivity[]>(`/polymarket/activity?limit=${limit}`);
+export const getPolyPositions = () =>
+  apiFetch<any[]>('/polymarket/positions');
 export const updateSimBalance = (value: string) =>
   apiFetch('/settings', { method: 'PATCH', body: JSON.stringify([
     { key: 'COPY_TRADE_SIM_BALANCE', value },

@@ -60,7 +60,7 @@ export class CtfService implements OnModuleInit {
     if (!this.provider) return 0;
     try {
       const ctf = new ethers.Contract(CTF_ADDRESS, CTF_ABI, this.provider);
-      const addr = address || process.env.PROXY_WALLET_ADDRESS;
+      const addr = address || process.env.PROXY_WALLET_ADDRESS_MAIN;
       const raw = await ctf.balanceOf(addr, tokenId);
       return parseFloat(ethers.utils.formatUnits(raw, 6));
     } catch {

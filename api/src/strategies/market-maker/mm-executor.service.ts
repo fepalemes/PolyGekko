@@ -45,10 +45,19 @@ export class MmExecutorService {
   private doneConditionIds = new Set<string>();
   // Serializes all sim-balance mutations to prevent concurrent read-check-write races
   private simBalanceMutex: Promise<void> = Promise.resolve();
+  // Serializes live balance checks — multiple markets detected simultaneously would
+  // all read the same on-chain balance and all pass the margin check
+  private liveBalanceMutex: Promise<void> = Promise.resolve();
 
   private withSimBalance<T>(fn: () => Promise<T>): Promise<T> {
     const next = this.simBalanceMutex.then(fn);
     this.simBalanceMutex = next.then(() => {}, () => {});
+    return next;
+  }
+
+  private withLiveBalance<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.liveBalanceMutex.then(fn);
+    this.liveBalanceMutex = next.then(() => {}, () => {});
     return next;
   }
 
@@ -312,18 +321,23 @@ export class MmExecutorService {
       return;
     }
 
-    // ── Live balance guard ────────────────────────────────────────────────
-    const liveBalance = await this.clob.getBalance();
-    const minLiveBal = await this.settings.getGlobalWalletMargin();
-    if (liveBalance < tradeSize) {
-      this.logger.warn(`[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} < $${tradeSize}`);
-      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} — need $${tradeSize}`);
-      this.cleanup(conditionId);
-      return;
-    }
-    if (liveBalance - tradeSize < minLiveBal) {
-      this.logger.warn(`[LIVE] Insufficient margin: balance=$${liveBalance.toFixed(2)} tradeSize=$${tradeSize.toFixed(2)} would leave $${(liveBalance-tradeSize).toFixed(2)} < minMargin=$${minLiveBal}`);
-      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Insufficient margin: $${liveBalance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(liveBalance-tradeSize).toFixed(2)} < required $${minLiveBal}`);
+    // ── Live balance guard — serialized to prevent concurrent entries exhausting balance ──
+    const canEnterLive = await this.withLiveBalance(async () => {
+      const liveBalance = await this.clob.getBalance();
+      const minLiveBal = await this.settings.getGlobalWalletMargin();
+      if (liveBalance < tradeSize) {
+        this.logger.warn(`[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} < $${tradeSize}`);
+        await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Insufficient balance: $${liveBalance.toFixed(2)} — need $${tradeSize}`);
+        return false;
+      }
+      if (liveBalance - tradeSize < minLiveBal) {
+        this.logger.warn(`[LIVE] Margin violation: $${liveBalance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(liveBalance - tradeSize).toFixed(2)} < required $${minLiveBal}`);
+        await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Margin violation: $${liveBalance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(liveBalance - tradeSize).toFixed(2)} < required $${minLiveBal}`);
+        return false;
+      }
+      return true;
+    });
+    if (!canEnterLive) {
       this.cleanup(conditionId);
       return;
     }
@@ -338,10 +352,46 @@ export class MmExecutorService {
       if (yesResult?.id) pos.yesBuyOrderId = yesResult.id;
       if (noResult?.id) pos.noBuyOrderId = noResult.id;
 
+      // Store capital breakdown for P&L calculation at close
+      (pos as any)._yesCapital = yesCapital;
+      (pos as any)._noCapital = noCapital;
+      (pos as any)._yesBuyPrice = yesBuyPrice;
+      (pos as any)._noBuyPrice = noBuyPrice;
+
       await this.logs.info(
         StrategyType.MARKET_MAKER,
         `[LIVE] GTC BUY orders placed: YES order=${pos.yesBuyOrderId}, NO order=${pos.noBuyOrderId}`,
       );
+
+      // Create DB position + trade records so the dashboard shows the entry immediately
+      try {
+        const dbPos = await this.positionsService.create({
+          conditionId,
+          tokenId: pos.yesTokenId,
+          market: pos.question,
+          shares: pos.yesSharesOwned + pos.noSharesOwned,
+          avgBuyPrice: (yesBuyPrice + noBuyPrice) / 2,
+          totalCost: tradeSize,
+          outcome: 'UP+DOWN',
+          strategyType: StrategyType.MARKET_MAKER,
+          isDryRun: false,
+        });
+        pos.dbPositionId = dbPos.id;
+        await this.trades.create({
+          positionId: dbPos.id, conditionId, tokenId: pos.yesTokenId, market: pos.question,
+          side: TradeSide.BUY, shares: pos.yesSharesOwned, price: yesBuyPrice, cost: yesCapital,
+          status: TradeStatus.FILLED, isDryRun: false, strategyType: StrategyType.MARKET_MAKER,
+        });
+        await this.trades.create({
+          positionId: dbPos.id, conditionId, tokenId: pos.noTokenId, market: pos.question,
+          side: TradeSide.BUY, shares: pos.noSharesOwned, price: noBuyPrice, cost: noCapital,
+          status: TradeStatus.FILLED, isDryRun: false, strategyType: StrategyType.MARKET_MAKER,
+        });
+        await this.simStats.recordBuy(StrategyType.MARKET_MAKER);
+        this.events.emitPositionUpdate(dbPos);
+      } catch (dbErr) {
+        this.logger.error(`[LIVE] Failed to create DB position: ${dbErr.message}`);
+      }
 
       this.monitorFillsLive(conditionId);
     } catch (err) {
@@ -526,10 +576,10 @@ export class MmExecutorService {
         return;
       }
 
-      // Track Bids
+      // Track Bids — case-insensitive status check (API may return 'matched' or 'MATCHED')
       if (pos.yesBuyOrderId && !pos.yesBuyFilled) {
         const order = await this.clob.getOrderStatus(pos.yesBuyOrderId);
-        if (order?.status === 'MATCHED') {
+        if (order?.status?.toUpperCase() === 'MATCHED') {
           pos.yesBuyFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] YES BUY order filled. Listing SELL...`);
           const sell = await this.clob.placeGTCOrder(pos.yesTokenId, 'SELL', pos.targetSellYes, pos.yesSharesOwned);
@@ -538,7 +588,7 @@ export class MmExecutorService {
       }
       if (pos.noBuyOrderId && !pos.noBuyFilled) {
         const order = await this.clob.getOrderStatus(pos.noBuyOrderId);
-        if (order?.status === 'MATCHED') {
+        if (order?.status?.toUpperCase() === 'MATCHED') {
           pos.noBuyFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO BUY order filled. Listing SELL...`);
           const sell = await this.clob.placeGTCOrder(pos.noTokenId, 'SELL', pos.targetSellNo, pos.noSharesOwned);
@@ -546,20 +596,34 @@ export class MmExecutorService {
         }
       }
 
-      // Track Asks
+      // Track Asks — case-insensitive status check
       if (pos.yesSellOrderId && !pos.yesSellFilled) {
         const order = await this.clob.getOrderStatus(pos.yesSellOrderId);
-        if (order?.status === 'MATCHED') {
+        if (order?.status?.toUpperCase() === 'MATCHED') {
           pos.yesSellFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] YES SELL order filled`);
         }
       }
       if (pos.noSellOrderId && !pos.noSellFilled) {
         const order = await this.clob.getOrderStatus(pos.noSellOrderId);
-        if (order?.status === 'MATCHED') {
+        if (order?.status?.toUpperCase() === 'MATCHED') {
           pos.noSellFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO SELL order filled`);
         }
+      }
+
+      // ── Both sells filled → close with profit ────────────────────────────
+      if (pos.yesSellFilled && pos.noSellFilled && !(pos as any)._closing) {
+        (pos as any)._closing = true;
+        clearInterval(interval);
+        const tradeSize = (pos as any)._tradeSize || this.config.tradeSize;
+        const revenue = (pos.targetSellYes * pos.yesSharesOwned) + (pos.targetSellNo * pos.noSharesOwned);
+        const pnl = revenue - tradeSize;
+        this.logger.log(`[LIVE] Both SELLs filled! P&L: $${pnl.toFixed(2)}`);
+        await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Both SELLs filled! P&L: $${pnl.toFixed(2)}`);
+        await this.closeLivePosition(pos, pnl, pnl > 0, tradeSize, pos.targetSellYes, pos.targetSellNo);
+        this.cleanup(pos.conditionId);
+        return;
       }
 
       // ── Early exit: stop-loss floor (live) ─────────────────────────────────
@@ -680,7 +744,26 @@ export class MmExecutorService {
   }
 
   private async cutLossLive(pos: MMPosition) {
+    // Guard against concurrent calls (early-exit interval + cut-loss timer can race)
+    if ((pos as any)._closing) return;
+    (pos as any)._closing = true;
+
     await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss triggered for "${pos.question}"`);
+
+    // Sync in-memory fill flags with CLOB — the 5s monitoring loop may not have
+    // run since orders filled, causing stale flags and $0.00 P&L calculations
+    await this.refreshLiveOrderStatus(pos);
+
+    // If both sells already filled before cut-loss fired, just record the profit
+    if (pos.yesSellFilled && pos.noSellFilled) {
+      const tradeSize = (pos as any)._tradeSize || this.config.tradeSize;
+      const revenue = (pos.targetSellYes * pos.yesSharesOwned) + (pos.targetSellNo * pos.noSharesOwned);
+      const pnl = revenue - tradeSize;
+      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: both sells already filled. P&L: $${pnl.toFixed(2)}`);
+      await this.closeLivePosition(pos, pnl, pnl > 0, tradeSize, pos.targetSellYes, pos.targetSellNo);
+      this.events.emitStatsUpdate({ type: 'MARKET_MAKER' });
+      return;
+    }
 
     // Cancel pending RESTING BIDS
     if (pos.yesBuyOrderId && !pos.yesBuyFilled) await this.clob.cancelOrder(pos.yesBuyOrderId);
@@ -690,20 +773,121 @@ export class MmExecutorService {
     if (pos.yesSellOrderId && !pos.yesSellFilled) await this.clob.cancelOrder(pos.yesSellOrderId);
     if (pos.noSellOrderId && !pos.noSellFilled) await this.clob.cancelOrder(pos.noSellOrderId);
 
-    // Pure Orderbook cut-loss: FOK Sell whatever we bought
+    const tradeSize = (pos as any)._tradeSize || this.config.tradeSize;
+    const yesCapital = (pos as any)._yesCapital ?? tradeSize / 2;
+    const noCapital  = (pos as any)._noCapital  ?? tradeSize / 2;
+
+    // FOK Sell whatever was bought — track actual exit prices for P&L
+    let yesExitPrice = 0;
+    let noExitPrice  = 0;
+
     if (pos.yesBuyFilled && !pos.yesSellFilled) {
       const mid = await this.clob.getMidpoint(pos.yesTokenId).catch(() => 0.05);
-      await this.clob.placeFOKOrder(pos.yesTokenId, 'SELL', mid * 0.95, pos.yesSharesOwned);
-      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold YES at ~${(mid * 0.95).toFixed(3)}`);
-    }
-    
-    if (pos.noBuyFilled && !pos.noSellFilled) {
-      const mid = await this.clob.getMidpoint(pos.noTokenId).catch(() => 0.05);
-      await this.clob.placeFOKOrder(pos.noTokenId, 'SELL', mid * 0.95, pos.noSharesOwned);
-      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold NO at ~${(mid * 0.95).toFixed(3)}`);
+      yesExitPrice = mid * 0.95;
+      await this.clob.placeFOKOrder(pos.yesTokenId, 'SELL', yesExitPrice, pos.yesSharesOwned);
+      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold YES at ~${yesExitPrice.toFixed(3)}`);
+    } else if (pos.yesSellFilled) {
+      yesExitPrice = pos.targetSellYes;
     }
 
+    if (pos.noBuyFilled && !pos.noSellFilled) {
+      const mid = await this.clob.getMidpoint(pos.noTokenId).catch(() => 0.05);
+      noExitPrice = mid * 0.95;
+      await this.clob.placeFOKOrder(pos.noTokenId, 'SELL', noExitPrice, pos.noSharesOwned);
+      await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] Cut-loss: market sold NO at ~${noExitPrice.toFixed(3)}`);
+    } else if (pos.noSellFilled) {
+      noExitPrice = pos.targetSellNo;
+    }
+
+    // P&L: revenue from filled buys + refund from unfilled buy orders
+    const yesRevenue   = pos.yesBuyFilled ? pos.yesSharesOwned * yesExitPrice : 0;
+    const noRevenue    = pos.noBuyFilled  ? pos.noSharesOwned  * noExitPrice  : 0;
+    const unfilledYes  = !pos.yesBuyFilled ? yesCapital : 0;
+    const unfilledNo   = !pos.noBuyFilled  ? noCapital  : 0;
+    const pnl = (yesRevenue + noRevenue + unfilledYes + unfilledNo) - tradeSize;
+
+    (pos as any)._isCutLoss = true;
+    await this.closeLivePosition(pos, pnl, pnl > 0, tradeSize, yesExitPrice, noExitPrice);
     this.events.emitStatsUpdate({ type: 'MARKET_MAKER' });
+  }
+
+  // Refresh in-memory fill flags from CLOB — prevents stale flags when cut-loss fires
+  // before the 5s monitoring loop has had a chance to detect fills
+  private async refreshLiveOrderStatus(pos: MMPosition) {
+    const isMatched = (s?: string) => s?.toUpperCase() === 'MATCHED';
+    if (pos.yesBuyOrderId && !pos.yesBuyFilled) {
+      const o = await this.clob.getOrderStatus(pos.yesBuyOrderId).catch(() => null);
+      if (isMatched(o?.status)) pos.yesBuyFilled = true;
+    }
+    if (pos.noBuyOrderId && !pos.noBuyFilled) {
+      const o = await this.clob.getOrderStatus(pos.noBuyOrderId).catch(() => null);
+      if (isMatched(o?.status)) pos.noBuyFilled = true;
+    }
+    if (pos.yesSellOrderId && !pos.yesSellFilled) {
+      const o = await this.clob.getOrderStatus(pos.yesSellOrderId).catch(() => null);
+      if (isMatched(o?.status)) pos.yesSellFilled = true;
+    }
+    if (pos.noSellOrderId && !pos.noSellFilled) {
+      const o = await this.clob.getOrderStatus(pos.noSellOrderId).catch(() => null);
+      if (isMatched(o?.status)) pos.noSellFilled = true;
+    }
+  }
+
+  private async closeLivePosition(
+    pos: MMPosition,
+    pnl: number,
+    isWin: boolean,
+    tradeSize: number,
+    yesExitPrice = 0,
+    noExitPrice = 0,
+  ) {
+    if (!pos.dbPositionId) return;
+    try {
+      const simOutcome = isWin ? SimOutcome.WIN : SimOutcome.LOSS;
+      await this.positionsService.update(pos.dbPositionId, {
+        status: PositionStatus.REDEEMED,
+        resolvedPnl: pnl,
+        simOutcome,
+      });
+
+      // Record SELL trades for the audit trail
+      if (pos.yesBuyFilled && yesExitPrice > 0) {
+        await this.trades.create({
+          positionId: pos.dbPositionId, conditionId: pos.conditionId, tokenId: pos.yesTokenId,
+          market: pos.question, side: TradeSide.SELL, shares: pos.yesSharesOwned,
+          price: yesExitPrice, cost: pos.yesSharesOwned * yesExitPrice,
+          status: TradeStatus.FILLED, isDryRun: false, strategyType: StrategyType.MARKET_MAKER,
+        }).catch(() => {});
+      }
+      if (pos.noBuyFilled && noExitPrice > 0) {
+        await this.trades.create({
+          positionId: pos.dbPositionId, conditionId: pos.conditionId, tokenId: pos.noTokenId,
+          market: pos.question, side: TradeSide.SELL, shares: pos.noSharesOwned,
+          price: noExitPrice, cost: pos.noSharesOwned * noExitPrice,
+          status: TradeStatus.FILLED, isDryRun: false, strategyType: StrategyType.MARKET_MAKER,
+        }).catch(() => {});
+      }
+
+      await this.simStats[isWin ? 'recordWin' : 'recordLoss'](StrategyType.MARKET_MAKER, pnl, pos.question);
+      this.events.emitPositionUpdate({ id: pos.dbPositionId, status: 'REDEEMED', resolvedPnl: pnl, simOutcome });
+      this.events.emitStatsUpdate({});
+
+      const liveBalance = await this.clob.getBalance().catch(() => 0);
+      this.telegram.notifyMMClose({
+        isDryRun: false,
+        market: pos.question,
+        asset: pos.asset,
+        duration: this.config.duration || '5m',
+        tradeSize,
+        pnl,
+        balance: liveBalance,
+        isCutLoss: (pos as any)._isCutLoss ?? false,
+        yesFilled: pos.yesSellFilled,
+        noFilled: pos.noSellFilled,
+      });
+    } catch (err) {
+      this.logger.error(`[LIVE] Failed to close DB position: ${err.message}`);
+    }
   }
 
   private cleanup(conditionId: string) {
