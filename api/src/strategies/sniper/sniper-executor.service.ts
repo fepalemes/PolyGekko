@@ -15,6 +15,7 @@ interface SniperAssetState {
   asset: string;
   pauseRoundsLeft: number;
   activeOrders: string[];
+  lastVolume: number;
 }
 
 @Injectable()
@@ -43,7 +44,7 @@ export class SniperExecutorService {
     this.isDryRun = isDryRun;
     this.sizing.parseMultipliers(config.multipliers);
     for (const asset of config.assets) {
-      this.assetStates.set(asset, { asset, pauseRoundsLeft: 0, activeOrders: [] });
+      this.assetStates.set(asset, { asset, pauseRoundsLeft: 0, activeOrders: [], lastVolume: 0 });
     }
     this.timer = setInterval(() => this.round(), 60000);
     this.round();
@@ -101,11 +102,42 @@ export class SniperExecutorService {
         : [];
     if (tokens.length < 2) return;
 
+    // ── Volume spike filter ──────────────────────────────────────────────────
+    const minSpikePct = this.config.volumeSpikePct ?? 0;
+    if (minSpikePct > 0) {
+      const currentVolume = parseFloat(market.volume24hr || market.volume || '0');
+      const lastVolume = state.lastVolume;
+      state.lastVolume = currentVolume;
+      if (lastVolume > 0 && currentVolume > 0) {
+        const spikePct = ((currentVolume - lastVolume) / lastVolume) * 100;
+        if (spikePct < minSpikePct) {
+          await this.logs.info(StrategyType.SNIPER,
+            `${asset.toUpperCase()}: volume spike ${spikePct.toFixed(1)}% < min ${minSpikePct}% — skipping round`);
+          return;
+        }
+        await this.logs.info(StrategyType.SNIPER, `${asset.toUpperCase()}: volume spike +${spikePct.toFixed(1)}% detected — proceeding`);
+      } else if (lastVolume === 0) {
+        // First round: just store the volume, don't place orders yet
+        return;
+      }
+    }
+
     const maxPerMin = await this.settings.getGlobalMaxEntriesPerMinute();
     if (maxPerMin > 0) {
       const allowed = await this.positions.acquireGlobalEntry(maxPerMin, 60);
       if (!allowed) {
         await this.logs.warn(StrategyType.SNIPER, `[RATE LIMIT] Max entries per min (${maxPerMin}) reached — skipping ${asset}`);
+        return;
+      }
+    }
+
+    // ── Global exposure cap ─────────────────────────────────────────────────
+    const maxExposure = await this.settings.getGlobalMaxExposure();
+    if (maxExposure > 0) {
+      const totalExposure = await this.positions.getTotalOpenExposure(this.isDryRun);
+      if (totalExposure >= maxExposure) {
+        await this.logs.warn(StrategyType.SNIPER,
+          `[EXPOSURE CAP] Total open exposure $${totalExposure.toFixed(2)} >= max $${maxExposure} — skipping ${asset}`);
         return;
       }
     }
@@ -181,7 +213,7 @@ export class SniperExecutorService {
       }
     } else {
       await this.logs.info(StrategyType.SNIPER, `Placing sniper orders for ${asset.toUpperCase()} | x${multiplier} | ${maxShares} shares`);
-      
+
       const liveBalance = await this.clob.getBalance();
       const minLiveBal = await this.settings.getGlobalWalletMargin();
       if (liveBalance < totalCost || liveBalance - totalCost < minLiveBal) {
@@ -190,8 +222,23 @@ export class SniperExecutorService {
       }
 
       for (const tokenId of tokens) {
+        // ── Partial fill tracking: check existing open orders for this token ──
+        const openOrders = await this.clob.getOpenOrders(tokenId);
+        const openPrices = new Set(openOrders.map((o: any) => parseFloat(o.price || o.originalPrice || '0').toFixed(4)));
+
+        // Remove filled/cancelled order IDs from activeOrders
+        state.activeOrders = state.activeOrders.filter(id =>
+          openOrders.some((o: any) => o.id === id),
+        );
+
         for (const [price, shares] of tiers) {
           if (shares < 1) continue;
+          // Skip if there is already an open order at this price tier
+          if (openPrices.has(price.toFixed(4))) {
+            await this.logs.info(StrategyType.SNIPER,
+              `${asset.toUpperCase()}: order already open at $${price} — skipping tier`);
+            continue;
+          }
           const result = await this.clob.placeGTCOrder(tokenId, 'BUY', price, shares * price);
           if (result?.id) state.activeOrders.push(result.id);
         }

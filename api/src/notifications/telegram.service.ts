@@ -68,6 +68,14 @@ export class TelegramService implements OnModuleInit, OnModuleDestroy {
     this.queue.push({ type: 'mmClose', params });
   }
 
+  /**
+   * Sends an immediate high-priority alert (bypasses the 5-min batch queue).
+   * Used for circuit breaker, session stop-loss, unexpected strategy stops.
+   */
+  async notifyAlert(title: string, body: string): Promise<void> {
+    await this.send(`🚨 <b>${this.escapeHtml(title)}</b>\n\n${this.escapeHtml(body)}`);
+  }
+
   // ── Core send (used by flush + test endpoint) ─────────────────────────────
 
   async send(html: string): Promise<void> {

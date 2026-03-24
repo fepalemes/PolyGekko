@@ -9,6 +9,7 @@ import { SimStatsPanel } from '@/components/dashboard/sim-stats-panel';
 import { BalancePanel } from '@/components/dashboard/balance-panel';
 import { WinLossChart } from '@/components/dashboard/win-loss-chart';
 import { AllocationChart } from '@/components/dashboard/allocation-chart';
+import { ConnectionHealth } from '@/components/dashboard/connection-health';
 import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance } from '@/lib/api';
 import { useSocketEvents } from '@/hooks/use-socket-events';
 import { useSimMode } from '@/hooks/use-sim-mode';
@@ -47,6 +48,9 @@ export default function DashboardPage() {
   return (
     <MainLayout title="Dashboard">
       <div className="space-y-5">
+        {/* Connection Health */}
+        <ConnectionHealth />
+
         {/* Row 1: Stats + Balance */}
         <div className="grid gap-5 lg:grid-cols-4">
           <div className="lg:col-span-3">

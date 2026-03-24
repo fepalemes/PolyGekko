@@ -3,6 +3,7 @@ import { StrategyType } from '@prisma/client';
 import { SettingsService } from '../../settings/settings.service';
 import { LogsService } from '../../logs/logs.service';
 import { EventsGateway } from '../../events/events.gateway';
+import { TelegramService } from '../../notifications/telegram.service';
 import { WatcherService } from './watcher.service';
 import { ExecutorService } from './executor.service';
 import { RedeemerService } from './redeemer.service';
@@ -18,6 +19,7 @@ export class CopyTradeService {
     private settings: SettingsService,
     private logs: LogsService,
     private events: EventsGateway,
+    private telegram: TelegramService,
     private watcher: WatcherService,
     private executor: ExecutorService,
     private redeemer: RedeemerService,
@@ -30,6 +32,7 @@ export class CopyTradeService {
       paused: this.paused,
       isDryRun: this.isDryRun,
       startedAt: this.startedAt?.toISOString() || null,
+      watcher: this.watcher.getStatus(),
     };
   }
 
@@ -55,6 +58,28 @@ export class CopyTradeService {
     this.events.emitStrategyStatus(this.getStatus());
 
     this.executor.setConfig(config, this.isDryRun);
+
+    // Session stop loss: snapshot starting balance and register auto-pause callback
+    if (config.sessionStopLossPercent > 0) {
+      const startBalance = this.isDryRun
+        ? await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000)
+        : 0; // live balance fetched lazily inside executor
+      this.executor.initSessionStopLoss(config.sessionStopLossPercent, startBalance, async () => {
+        if (this.running && !this.paused) {
+          this.paused = true;
+          await this.logs.warn(StrategyType.COPY_TRADE,
+            `[SESSION STOP LOSS] Loss threshold of ${config.sessionStopLossPercent}% reached — strategy auto-paused`);
+          this.events.emitStrategyStatus(this.getStatus());
+          await this.telegram.notifyAlert(
+            'Copy Trade — Session Stop-Loss',
+            `Loss threshold of ${config.sessionStopLossPercent}% reached. Strategy has been auto-paused to protect capital.`,
+          );
+        }
+      });
+    } else {
+      this.executor.initSessionStopLoss(0, 0, null);
+    }
+
     this.watcher.start(config.traderAddress, (trade) => {
       if (this.paused) return;
       this.executor.onTradeDetected(trade);

@@ -31,6 +31,19 @@ export class ClobService implements OnModuleInit {
     return this.client;
   }
 
+  isClientInitialized(): boolean {
+    return this.client !== null;
+  }
+
+  async ping(): Promise<boolean> {
+    try {
+      const resp = await fetch('https://clob.polymarket.com/ok', { signal: AbortSignal.timeout(5000) });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async getBalance(): Promise<number> {
     if (!this.client) return 0;
     try {

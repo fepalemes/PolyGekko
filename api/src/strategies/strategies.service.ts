@@ -6,6 +6,7 @@ import { MarketMakerService } from './market-maker/market-maker.service';
 import { SniperService } from './sniper/sniper.service';
 import { SimStatsService } from './sim-stats.service';
 import { ClobService } from '../polymarket/clob.service';
+import { GammaService } from '../polymarket/gamma.service';
 import { SettingsService, TradingMode, TRADING_MODE_PRESETS } from '../settings/settings.service';
 
 @Injectable()
@@ -19,6 +20,7 @@ export class StrategiesService implements OnApplicationBootstrap {
     private sniper: SniperService,
     private simStats: SimStatsService,
     private clob: ClobService,
+    private gamma: GammaService,
     private settings: SettingsService,
   ) {}
 
@@ -136,6 +138,105 @@ export class StrategiesService implements OnApplicationBootstrap {
   async applyTradingMode(mode: TradingMode) {
     await this.settings.applyTradingMode(mode);
     return { mode, applied: mode !== 'custom' };
+  }
+
+  async runBacktest(params: {
+    strategyType?: string;
+    stopLossPercent?: number;
+    takeProfitPercent?: number;
+    positionSizeUsdc?: number;
+    isDryRun?: boolean;
+  }) {
+    const { stopLossPercent = 0, takeProfitPercent = 0, positionSizeUsdc = 0, isDryRun = true } = params;
+    const where: any = { status: { in: ['SOLD', 'REDEEMED'] } };
+    if (params.strategyType) where.strategyType = params.strategyType;
+    if (isDryRun !== undefined) where.isDryRun = isDryRun;
+
+    const positions = await this.prisma.position.findMany({ where });
+    if (positions.length === 0) return { message: 'No historical positions found', totalPositions: 0 };
+
+    let totalPnl = 0;
+    let wins = 0;
+    let losses = 0;
+    let cumulativePnl = 0;
+    let peak = 0;
+    let maxDrawdown = 0;
+    const pnlSeries: number[] = [];
+
+    for (const pos of positions) {
+      const avgBuy = parseFloat(pos.avgBuyPrice.toString());
+      const shares = parseFloat(pos.shares.toString());
+      const resolvedPnl = parseFloat((pos.resolvedPnl ?? '0').toString());
+      const isWin = resolvedPnl > 0;
+
+      // Normalize position size if requested
+      const origCost = parseFloat(pos.totalCost.toString());
+      const sizeFactor = positionSizeUsdc > 0 && origCost > 0 ? positionSizeUsdc / origCost : 1;
+      const adjShares = shares * sizeFactor;
+      const adjCost = origCost * sizeFactor;
+
+      let simPnl: number;
+      if (isWin) {
+        // Market resolved to $1. If take-profit configured, simulate early exit.
+        if (takeProfitPercent > 0) {
+          const tpPrice = Math.min(avgBuy * (1 + takeProfitPercent / 100), 0.99);
+          simPnl = adjShares * tpPrice - adjCost;
+        } else {
+          simPnl = adjShares * 1.0 - adjCost; // full win
+        }
+      } else {
+        // Market resolved to $0. If stop-loss configured, simulate early exit.
+        if (stopLossPercent > 0) {
+          const slPrice = avgBuy * (1 - stopLossPercent / 100);
+          simPnl = adjShares * Math.max(slPrice, 0) - adjCost;
+        } else {
+          simPnl = -adjCost; // full loss
+        }
+      }
+
+      totalPnl += simPnl;
+      cumulativePnl += simPnl;
+      pnlSeries.push(cumulativePnl);
+      if (cumulativePnl > peak) peak = cumulativePnl;
+      const drawdown = peak - cumulativePnl;
+      if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+      if (simPnl >= 0) wins++; else losses++;
+    }
+
+    const n = positions.length;
+    const winRate = (wins / n) * 100;
+    const avgPnl = totalPnl / n;
+
+    // Simple Sharpe: mean(pnlDeltas) / std(pnlDeltas)
+    const deltas = pnlSeries.map((v, i) => i === 0 ? v : v - pnlSeries[i - 1]);
+    const mean = deltas.reduce((s, v) => s + v, 0) / deltas.length;
+    const variance = deltas.reduce((s, v) => s + Math.pow(v - mean, 2), 0) / deltas.length;
+    const sharpe = variance > 0 ? mean / Math.sqrt(variance) : 0;
+
+    return {
+      totalPositions: n,
+      wins,
+      losses,
+      winRate: parseFloat(winRate.toFixed(1)),
+      totalPnl: parseFloat(totalPnl.toFixed(2)),
+      avgPnlPerTrade: parseFloat(avgPnl.toFixed(2)),
+      maxDrawdown: parseFloat(maxDrawdown.toFixed(2)),
+      sharpeRatio: parseFloat(sharpe.toFixed(3)),
+      params: { stopLossPercent, takeProfitPercent, positionSizeUsdc, isDryRun },
+    };
+  }
+
+  async getHealth() {
+    const [clobApi, gammaApi] = await Promise.all([
+      this.clob.ping().catch(() => false),
+      this.gamma.ping().catch(() => false),
+    ]);
+    return {
+      checkedAt: new Date().toISOString(),
+      clob: { api: clobApi, clientInitialized: this.clob.isClientInitialized() },
+      gamma: { api: gammaApi },
+      strategies: this.getAllStatus(),
+    };
   }
 
   async getBalance(isDryRun: boolean) {

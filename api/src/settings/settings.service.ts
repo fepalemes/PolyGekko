@@ -114,6 +114,15 @@ const DEFAULT_SETTINGS = [
   { key: 'COPY_TRADE_SIM_BALANCE', value: '1000', category: 'copy_trade', description: 'Fictitious balance for simulation mode (USDC)' },
   { key: 'COPY_TRADE_MAX_BALANCE_USAGE_PERCENT', value: '30', category: 'copy_trade', description: 'Max % of total balance to keep in open positions' },
   { key: 'COPY_TRADE_MIN_LIVE_BALANCE', value: '5', category: 'copy_trade', description: 'Minimum USDC to keep in wallet at all times — never deploy below this (live mode only)' },
+  { key: 'COPY_TRADE_PROPORTIONAL_FACTOR', value: '1.0', category: 'copy_trade', description: 'When SIZE_MODE=proportional, multiply the trader\'s trade size by this factor (1.0 = same size, 0.5 = half, 2.0 = double)' },
+  { key: 'COPY_TRADE_MIN_VOLUME', value: '0', category: 'copy_trade', description: 'Minimum total trading volume (USDC) a market must have to be entered. 0 = disabled.' },
+  { key: 'COPY_TRADE_ALLOWED_TAGS', value: '', category: 'copy_trade', description: 'Comma-separated tag slugs to allow (e.g. "crypto,politics"). Empty = all markets allowed.' },
+  { key: 'COPY_TRADE_MARKET_WHITELIST', value: '', category: 'copy_trade', description: 'Comma-separated conditionIds to exclusively enter. Empty = all markets allowed.' },
+  { key: 'COPY_TRADE_MARKET_BLACKLIST', value: '', category: 'copy_trade', description: 'Comma-separated conditionIds to never enter.' },
+  { key: 'COPY_TRADE_SESSION_STOP_LOSS', value: '0', category: 'copy_trade', description: 'Auto-pause if session P&L drops below this % of starting balance (0 = disabled). E.g. 20 = pause when -20% is reached.' },
+  { key: 'COPY_TRADE_KELLY_ENABLED', value: 'false', category: 'copy_trade', description: 'Use Kelly criterion for dynamic position sizing based on historical win rate. Requires KELLY_MIN_TRADES resolved positions, then falls back if insufficient data.' },
+  { key: 'COPY_TRADE_KELLY_MAX_FRACTION', value: '0.25', category: 'copy_trade', description: 'Maximum fraction of balance Kelly criterion can allocate per trade (0.25 = max 25%). Acts as a cap to avoid over-betting.' },
+  { key: 'COPY_TRADE_KELLY_MIN_TRADES', value: '10', category: 'copy_trade', description: 'Minimum resolved trades before Kelly kicks in. Uses fixed/percentage sizing until this threshold is met.' },
 
   // ── Market Maker ────────────────────────────────────────────────────────────
   { key: 'MM_RUNNING', value: 'false', category: 'market_maker', description: 'Whether the strategy is running (auto-restored on restart)' },
@@ -137,6 +146,9 @@ const DEFAULT_SETTINGS = [
   { key: 'MM_MAX_BIAS_PERCENT', value: '70', category: 'market_maker', description: 'Maximum bias percent (e.g. 70 means up to 70% capital on trending side)' },
   { key: 'MM_BINANCE_KLINE_INTERVAL', value: '1m', category: 'market_maker', description: 'Kline interval for Binance momentum. "1m" is ideal for 5m markets. Options: 1m, 3m, 5m' },
   { key: 'MM_BINANCE_KLINE_PERIODS', value: '3', category: 'market_maker', description: 'Number of klines to compute short-term momentum (3-5 recommended)' },
+  { key: 'MM_MAX_ACTIVE_MARKETS', value: '0', category: 'market_maker', description: 'Maximum number of simultaneously active positions. 0 = unlimited.' },
+  { key: 'MM_MIN_SPREAD', value: '0', category: 'market_maker', description: 'Minimum spread (1 - combined midpoint) required to enter a market. E.g. 0.05 = only enter when YES+NO combined is ≤ 0.95, guaranteeing a 5¢ profit margin. 0 = disabled.' },
+  { key: 'MM_MAX_POSITION_AGE_HOURS', value: '0', category: 'market_maker', description: 'Auto-exit a position if it has been open for more than this many hours. 0 = disabled (position runs until market close or cut-loss).' },
   // ── Entry filters ─────────────────────────────────────────────────────────
   { key: 'MM_ENTRY_MAX_COMBINED', value: '1.02', category: 'market_maker', description: 'Max combined midpoint (YES+NO) to enter. Above 1.0 means you are buying above fair value on both sides. Recommended 1.00–1.05 (Polymarket 5m markets open near 1.00)' },
   { key: 'MM_ENTRY_MIN_TOKEN_PRICE', value: '0.20', category: 'market_maker', description: 'Min midpoint for each token. Avoids very one-sided markets (e.g. YES already at 0.95)' },
@@ -149,6 +161,7 @@ const DEFAULT_SETTINGS = [
   { key: 'TELEGRAM_ENABLED', value: 'false', category: 'telegram', description: 'Enable Telegram notifications' },
   { key: 'TELEGRAM_BOT_TOKEN', value: '', category: 'telegram', description: 'Bot token from @BotFather (e.g. 123456789:AAF...)' },
   { key: 'TELEGRAM_CHAT_ID', value: '', category: 'telegram', description: 'Your chat/group ID (use @userinfobot to find it)' },
+  { key: 'TELEGRAM_ALERT_LOSS_THRESHOLD', value: '0', category: 'telegram', description: 'Send an immediate Telegram alert when a single position closes with a loss larger than this USDC amount. 0 = disabled.' },
 
   // ── System ──────────────────────────────────────────────────────────────────
   { key: 'TRADING_MODE', value: 'custom', category: 'system', description: 'Active trading mode: high | intermediate | low | custom' },
@@ -156,6 +169,9 @@ const DEFAULT_SETTINGS = [
   { key: 'GLOBAL_SIMULATION_MODE', value: 'true', category: 'system', description: 'Applies Simulation mode globally and overrides individual strategy dry-run settings' },
   { key: 'GLOBAL_WALLET_MARGIN', value: '50', category: 'system', description: 'Minimum USDC that must remain in the wallet at all times across all strategies (Live mode)' },
   { key: 'GLOBAL_MAX_ENTRIES_PER_MINUTE', value: '5', category: 'system', description: 'Maximum total entries across all strategies per minute (0 = unlimited)' },
+  { key: 'GLOBAL_MAX_EXPOSURE_USDC', value: '0', category: 'system', description: 'Maximum total USDC deployed in open positions across ALL strategies simultaneously. 0 = disabled.' },
+  { key: 'GLOBAL_CIRCUIT_BREAKER_PCT', value: '0', category: 'system', description: 'Auto-pause ALL strategies if total P&L loss in the window exceeds this % of current balance. 0 = disabled. E.g. 20 = pause when losses exceed 20% of balance.' },
+  { key: 'GLOBAL_CIRCUIT_BREAKER_WINDOW_HOURS', value: '24', category: 'system', description: 'Time window (hours) used for circuit breaker P&L calculation.' },
 
   // ── Sniper ──────────────────────────────────────────────────────────────────
   { key: 'SNIPER_RUNNING', value: 'false', category: 'sniper', description: 'Whether the strategy is running (auto-restored on restart)' },
@@ -169,6 +185,7 @@ const DEFAULT_SETTINGS = [
   { key: 'SNIPER_MULTIPLIERS', value: '', category: 'sniper', description: 'Time-based sizing: "HH:MM-HH:MM:factor,..."' },
   { key: 'SNIPER_SCHEDULE', value: '', category: 'sniper', description: 'Per-asset schedule: "ETH=11:40-15:40,BTC=09:00-17:00"' },
   { key: 'SNIPER_SIM_BALANCE', value: '1000', category: 'sniper', description: 'Fictitious balance for Sniper simulation mode (USDC)' },
+  { key: 'SNIPER_VOLUME_SPIKE_PCT', value: '0', category: 'sniper', description: 'Min volume increase % since last round to trigger order placement. 0 = disabled (always place orders).' },
 ];
 
 @Injectable()
@@ -225,6 +242,18 @@ export class SettingsService implements OnModuleInit {
     return this.getNumber('GLOBAL_MAX_ENTRIES_PER_MINUTE', 5);
   }
 
+  async getGlobalMaxExposure(): Promise<number> {
+    return this.getNumber('GLOBAL_MAX_EXPOSURE_USDC', 0);
+  }
+
+  async getCircuitBreakerConfig(): Promise<{ pct: number; windowHours: number }> {
+    const [pct, windowHours] = await Promise.all([
+      this.getNumber('GLOBAL_CIRCUIT_BREAKER_PCT', 0),
+      this.getNumber('GLOBAL_CIRCUIT_BREAKER_WINDOW_HOURS', 24),
+    ]);
+    return { pct, windowHours };
+  }
+
   async getBool(key: string, defaultValue = false): Promise<boolean> {
     const val = await this.get(key);
     if (val === null) return defaultValue;
@@ -232,16 +261,31 @@ export class SettingsService implements OnModuleInit {
   }
 
   async set(key: string, value: string) {
-    return this.prisma.setting.upsert({
+    const existing = await this.prisma.setting.findUnique({ where: { key } });
+    const result = await this.prisma.setting.upsert({
       where: { key },
       create: { key, value },
       update: { value },
     });
+    // Record change in history (skip if value didn't change)
+    if (!existing || existing.value !== value) {
+      await this.prisma.settingHistory.create({
+        data: { key, oldValue: existing?.value ?? null, newValue: value },
+      });
+    }
+    return result;
   }
 
   async bulkSet(settings: Array<{ key: string; value: string }>) {
     const results = await Promise.all(settings.map(s => this.set(s.key, s.value)));
     return results;
+  }
+
+  async getHistory(limit = 100) {
+    return this.prisma.settingHistory.findMany({
+      orderBy: { changedAt: 'desc' },
+      take: limit,
+    });
   }
 
   async getCopyTradeConfig() {
@@ -268,6 +312,21 @@ export class SettingsService implements OnModuleInit {
       simBalance: parseFloat(map.COPY_TRADE_SIM_BALANCE || '1000'),
       maxBalanceUsagePercent: parseFloat(map.COPY_TRADE_MAX_BALANCE_USAGE_PERCENT || '30'),
       minLiveBalance: parseFloat(map.COPY_TRADE_MIN_LIVE_BALANCE || '5'),
+      proportionalFactor: parseFloat(map.COPY_TRADE_PROPORTIONAL_FACTOR || '1.0'),
+      minVolume: parseFloat(map.COPY_TRADE_MIN_VOLUME || '0'),
+      allowedTags: map.COPY_TRADE_ALLOWED_TAGS
+        ? map.COPY_TRADE_ALLOWED_TAGS.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [],
+      marketWhitelist: map.COPY_TRADE_MARKET_WHITELIST
+        ? map.COPY_TRADE_MARKET_WHITELIST.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [],
+      marketBlacklist: map.COPY_TRADE_MARKET_BLACKLIST
+        ? map.COPY_TRADE_MARKET_BLACKLIST.split(',').map((s: string) => s.trim()).filter(Boolean)
+        : [],
+      sessionStopLossPercent: parseFloat(map.COPY_TRADE_SESSION_STOP_LOSS || '0'),
+      kellyEnabled: map.COPY_TRADE_KELLY_ENABLED === 'true',
+      kellyMaxFraction: parseFloat(map.COPY_TRADE_KELLY_MAX_FRACTION || '0.25'),
+      kellyMinTrades: parseInt(map.COPY_TRADE_KELLY_MIN_TRADES || '10'),
     };
   }
 
@@ -299,6 +358,9 @@ export class SettingsService implements OnModuleInit {
       entryMaxTokenPrice: parseFloat(map.MM_ENTRY_MAX_TOKEN_PRICE || '0.80'),
       earlyExitEnabled: map.MM_EARLY_EXIT_ENABLED !== 'false',
       earlyExitLossPct: parseFloat(map.MM_EARLY_EXIT_LOSS_PCT || '40'),
+      maxActiveMarkets: parseInt(map.MM_MAX_ACTIVE_MARKETS || '0'),
+      minSpread: parseFloat(map.MM_MIN_SPREAD || '0'),
+      maxPositionAgeHours: parseFloat(map.MM_MAX_POSITION_AGE_HOURS || '0'),
     };
   }
 
@@ -315,6 +377,7 @@ export class SettingsService implements OnModuleInit {
       multipliers: map.SNIPER_MULTIPLIERS || '',
       schedule: map.SNIPER_SCHEDULE || '',
       simBalance: parseFloat(map.SNIPER_SIM_BALANCE || '1000'),
+      volumeSpikePct: parseFloat(map.SNIPER_VOLUME_SPIKE_PCT || '0'),
     };
   }
 

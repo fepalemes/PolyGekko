@@ -43,6 +43,14 @@ export class MmExecutorService {
   private positions = new Map<string, MMPosition>();
   // Markets that have already been processed this session — never re-enter
   private doneConditionIds = new Set<string>();
+  // Serializes all sim-balance mutations to prevent concurrent read-check-write races
+  private simBalanceMutex: Promise<void> = Promise.resolve();
+
+  private withSimBalance<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.simBalanceMutex.then(fn);
+    this.simBalanceMutex = next.then(() => {}, () => {});
+    return next;
+  }
 
   constructor(
     private clob: ClobService,
@@ -81,6 +89,14 @@ export class MmExecutorService {
     const conditionId = market.conditionId || market.condition_id;
     if (this.positions.has(conditionId)) return;
     if (this.doneConditionIds.has(conditionId)) return; // already processed this session
+
+    // ── Cap: max simultaneous active markets ────────────────────────────────
+    const maxActive = this.config.maxActiveMarkets ?? 0;
+    if (maxActive > 0 && this.positions.size >= maxActive) {
+      await this.logs.info(StrategyType.MARKET_MAKER,
+        `[CAP] Max active markets (${maxActive}) reached — skipping "${market.question}"`);
+      return;
+    }
 
     // clobTokenIds is normalized to array by GammaService
     const tokens: string[] = Array.isArray(market.clobTokenIds) ? market.clobTokenIds : [];
@@ -151,6 +167,19 @@ export class MmExecutorService {
     const cutLossAt = endTime.getTime() - this.config.cutLossTime * 1000;
     const cutLossDelay = Math.max(0, cutLossAt - now);
     setTimeout(() => this.cutLoss(conditionId), cutLossDelay);
+
+    // ── Timeout exit: auto-exit if position is still open after N hours ──────
+    const maxAgeHours = this.config.maxPositionAgeHours ?? 0;
+    if (maxAgeHours > 0) {
+      const maxAgeMs = maxAgeHours * 3600 * 1000;
+      setTimeout(async () => {
+        if (this.positions.has(conditionId)) {
+          await this.logs.warn(StrategyType.MARKET_MAKER,
+            `[TIMEOUT EXIT] Position "${position.question}" open for ${maxAgeHours}h — cutting loss`);
+          await this.cutLoss(conditionId);
+        }
+      }, maxAgeMs);
+    }
   }
 
   private async enter(conditionId: string) {
@@ -185,6 +214,18 @@ export class MmExecutorService {
       }
     }
 
+    // ── Global exposure cap ─────────────────────────────────────────────────
+    const maxExposure = await this.settings.getGlobalMaxExposure();
+    if (maxExposure > 0) {
+      const totalExposure = await this.positionsService.getTotalOpenExposure(this.isDryRun);
+      if (totalExposure >= maxExposure) {
+        await this.logs.warn(StrategyType.MARKET_MAKER,
+          `[EXPOSURE CAP] Total open exposure $${totalExposure.toFixed(2)} >= max $${maxExposure} — skipping "${pos.question}"`);
+        this.cleanup(conditionId);
+        return;
+      }
+    }
+
     const tradeSize = this.config.dynamicSizingEnabled
       ? Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2))
       : this.config.tradeSize;
@@ -207,6 +248,18 @@ export class MmExecutorService {
         `[ENTRY FILTER] Skipping "${pos.question}" — ${reason}. Combined mid above threshold, buying above fair value.`);
       this.cleanup(conditionId);
       return;
+    }
+
+    // ── Entry filter: minimum spread (profit margin) ──────────────────────────
+    const minSpread = this.config.minSpread ?? 0;
+    if (minSpread > 0) {
+      const spread = 1 - combined;
+      if (spread < minSpread) {
+        await this.logs.warn(StrategyType.MARKET_MAKER,
+          `[ENTRY FILTER] Skipping "${pos.question}" — spread=${spread.toFixed(3)} < min=${minSpread} (combined=${combined.toFixed(3)})`);
+        this.cleanup(conditionId);
+        return;
+      }
     }
 
     // ── Entry filter: individual token price bounds ───────────────────────────
@@ -329,26 +382,28 @@ export class MmExecutorService {
       return;
     }
 
-    // Check sim balance
-    const balance = await this.settings.getNumber('MM_SIM_BALANCE', 1000);
+    // Atomically check and deduct sim balance — prevents concurrent entries racing on the same value
     const minBal = await this.settings.getGlobalWalletMargin();
-    
-    if (balance < tradeSize) {
-      this.logger.warn(`[SIM] Insufficient balance: $${balance.toFixed(2)} < $${tradeSize}`);
-      await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient balance: $${balance.toFixed(2)} — need $${tradeSize}`);
-      this.cleanup(conditionId);
-      return;
-    }
-    
-    if (balance - tradeSize < minBal) {
-      this.logger.warn(`[SIM] Insufficient margin: balance=$${balance.toFixed(2)} tradeSize=$${tradeSize.toFixed(2)} would leave $${(balance - tradeSize).toFixed(2)} < minMargin=$${minBal}`);
-      await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient margin: $${balance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(balance-tradeSize).toFixed(2)} < required $${minBal} — reset sim data to restore balance`);
-      this.cleanup(conditionId);
-      return;
-    }
+    const canAfford = await this.withSimBalance(async () => {
+      const balance = await this.settings.getNumber('MM_SIM_BALANCE', 1000);
+      if (balance < tradeSize) {
+        this.logger.warn(`[SIM] Insufficient balance: $${balance.toFixed(2)} < $${tradeSize}`);
+        await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient balance: $${balance.toFixed(2)} — need $${tradeSize}`);
+        return false;
+      }
+      if (balance - tradeSize < minBal) {
+        this.logger.warn(`[SIM] Insufficient margin: balance=$${balance.toFixed(2)} would leave $${(balance - tradeSize).toFixed(2)} < minMargin=$${minBal}`);
+        await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient margin: $${balance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(balance - tradeSize).toFixed(2)} < required $${minBal} — reset sim data to restore balance`);
+        return false;
+      }
+      await this.settings.set('MM_SIM_BALANCE', (balance - tradeSize).toFixed(2));
+      return true;
+    });
 
-    // Deduct from sim balance
-    await this.settings.set('MM_SIM_BALANCE', (balance - tradeSize).toFixed(2));
+    if (!canAfford) {
+      this.cleanup(conditionId);
+      return;
+    }
 
     // Create DB position
     try {
@@ -381,7 +436,7 @@ export class MmExecutorService {
       this.logger.error(`[SIM] Failed to create DB position: ${err.message}`);
     }
 
-    const remainingBal = balance - tradeSize;
+    const remainingBal = await this.settings.getNumber('MM_SIM_BALANCE', 0);
     this.logger.log(`[SIM] Buy filled: $${tradeSize} → ${pos.yesSharesOwned.toFixed(2)} YES & ${pos.noSharesOwned.toFixed(2)} NO | bal: $${remainingBal.toFixed(2)}`);
     await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Buy filled: $${tradeSize} | remaining balance: $${remainingBal.toFixed(2)}`);
     
@@ -593,11 +648,13 @@ export class MmExecutorService {
         simOutcome,
       });
 
-      // Credit back: original cost + P&L
+      // Atomically credit back: original cost + P&L
       const refund = tradeSize + pnl;
       if (refund > 0) {
-        const currentBal = await this.settings.getNumber('MM_SIM_BALANCE', 0);
-        await this.settings.set('MM_SIM_BALANCE', (currentBal + refund).toFixed(2));
+        await this.withSimBalance(async () => {
+          const currentBal = await this.settings.getNumber('MM_SIM_BALANCE', 0);
+          await this.settings.set('MM_SIM_BALANCE', (currentBal + refund).toFixed(2));
+        });
       }
 
       await this.simStats[isWin ? 'recordWin' : 'recordLoss'](StrategyType.MARKET_MAKER, pnl, pos.question);

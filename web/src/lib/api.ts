@@ -17,6 +17,8 @@ export const getPositions = (filters?: { status?: string; strategyType?: string;
   return apiFetch<Position[]>(`/positions?${params}`);
 };
 export const getPosition = (id: number) => apiFetch<Position>(`/positions/${id}`);
+export const getUnrealizedPnl = (isDryRun?: string) =>
+  apiFetch<Array<{ positionId: number; currentPrice: number | null; currentValue: number | null; unrealizedPnl: number | null; unrealizedPnlPct: number | null }>>(`/positions/unrealized-pnl?isDryRun=${isDryRun ?? 'true'}`);
 
 // Trades
 export const getTrades = (filters?: { conditionId?: string; strategyType?: string; side?: string; isDryRun?: string; limit?: string }) => {
@@ -41,6 +43,14 @@ export const updateSetting = (key: string, value: string) =>
   apiFetch(`/settings/${key}`, { method: 'PATCH', body: JSON.stringify({ value }) });
 export const bulkUpdateSettings = (settings: Array<{ key: string; value: string }>) =>
   apiFetch('/settings', { method: 'PATCH', body: JSON.stringify(settings) });
+export const getSettingsHistory = (limit?: number) =>
+  apiFetch<Array<{ id: number; key: string; oldValue: string | null; newValue: string; changedAt: string }>>(`/settings/history${limit ? `?limit=${limit}` : ''}`);
+export const exportSettings = () =>
+  apiFetch<{ exportedAt: string; settings: Record<string, string> }>('/settings/export');
+export const importSettings = (settings: Record<string, string>) =>
+  apiFetch<{ imported: number; skipped: number; message: string }>('/settings/import', {
+    method: 'POST', body: JSON.stringify({ settings }),
+  });
 
 // Strategies
 export const getStrategiesStatus = () => apiFetch<StrategyStatus[]>('/strategies');
@@ -53,6 +63,8 @@ export const pauseStrategy = (type: string) =>
   apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/pause`, { method: 'POST' });
 export const resumeStrategy = (type: string) =>
   apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/resume`, { method: 'POST' });
+export const getHealth = () =>
+  apiFetch<{ checkedAt: string; clob: { api: boolean; clientInitialized: boolean }; gamma: { api: boolean }; strategies: any[] }>('/strategies/health');
 export const getSimStats = () => apiFetch<SimStats[]>('/strategies/sim-stats');
 export const getPerformance = (strategy?: string, limit?: number) => {
   const params = new URLSearchParams();
@@ -66,6 +78,19 @@ export const clearSimData = () =>
   apiFetch('/strategies/sim-data', { method: 'DELETE' });
 export const getBalance = (isDryRun = true) =>
   apiFetch<{ balance: number; isSimulated: boolean }>(`/strategies/balance?isDryRun=${isDryRun}`);
+export const runBacktest = (params: {
+  strategyType?: string;
+  stopLossPercent?: number;
+  takeProfitPercent?: number;
+  positionSizeUsdc?: number;
+  isDryRun?: boolean;
+}) => apiFetch<{
+  totalPositions: number; wins: number; losses: number;
+  winRate: number; totalPnl: number; avgPnlPerTrade: number;
+  maxDrawdown: number; sharpeRatio: number;
+  params: typeof params; message?: string;
+}>('/strategies/backtest', { method: 'POST', body: JSON.stringify(params) });
+
 export const getRealBalance = () =>
   apiFetch<{ balance: number }>('/polymarket/balance');
 export const updateSimBalance = (value: string) =>

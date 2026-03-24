@@ -82,4 +82,14 @@ export class PositionsService {
   async updateByConditionId(conditionId: string, data: any) {
     return this.prisma.position.update({ where: { conditionId }, data });
   }
+
+  async getTotalOpenExposure(isDryRun?: boolean): Promise<number> {
+    const where: any = { status: 'OPEN' };
+    if (isDryRun !== undefined) where.isDryRun = isDryRun;
+    const positions = await this.prisma.position.findMany({
+      where,
+      select: { totalCost: true },
+    });
+    return positions.reduce((sum, p) => sum + parseFloat(p.totalCost.toString()), 0);
+  }
 }

@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   LayoutDashboard, Briefcase, ArrowLeftRight, Terminal,
-  Settings, Copy, BarChart2, Crosshair, Zap, X,
+  Settings, Copy, BarChart2, Crosshair, Zap, X, FlaskConical,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useLang } from '@/lib/i18n';
@@ -127,6 +127,18 @@ export function Sidebar({ open, onClose }: SidebarProps) {
           })}
 
           <div className="mt-auto">
+            <Link
+              href="/backtest"
+              className={cn(
+                'flex items-center gap-2.5 rounded-md px-3 py-2 text-sm transition-all duration-150',
+                pathname === '/backtest'
+                  ? 'bg-primary/10 text-primary font-medium'
+                  : 'text-muted-foreground hover:bg-secondary hover:text-foreground',
+              )}
+            >
+              <FlaskConical className={cn('h-4 w-4', pathname === '/backtest' && 'text-primary')} />
+              {t.nav.backtest}
+            </Link>
             <Link
               href="/settings"
               className={cn(

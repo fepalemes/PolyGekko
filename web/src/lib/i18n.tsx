@@ -16,6 +16,7 @@ const T = {
       logs: 'Logs',
       settings: 'Settings',
       strategies: 'Strategies',
+      backtest: 'Backtest',
     },
 
     common: {
@@ -46,6 +47,8 @@ const T = {
       allStatuses: 'All statuses',
       allStrategies: 'All strategies',
       noData: 'No data found',
+      connections: 'Connections',
+      checked: 'checked',
     },
 
     header: {
@@ -95,10 +98,15 @@ const T = {
           },
           sizeMode: {
             label: 'Size Mode',
-            help: '"Fixed amount": always enter with exactly the configured USDC amount regardless of how much the trader invested. "Percentage of max": uses MAX_POSITION_SIZE as the base and applies the Size %. "Percentage of balance": uses your current balance as the base.',
+            help: '"Fixed amount": always enter with exactly the configured USDC amount. "Proportional": mirrors the trader\'s trade size multiplied by a factor. "Percentage of max": uses MAX_POSITION_SIZE as the base. "Percentage of balance": uses your current balance.',
             optFixed: 'Fixed amount (USDC)',
+            optProportional: 'Proportional to trader',
             optPercentage: 'Percentage of max',
             optBalance: 'Percentage of balance',
+          },
+          proportionalFactor: {
+            label: 'Proportional Factor',
+            help: 'Multiplier applied to the trader\'s trade size when Size Mode is "Proportional". 1.0 = same size as trader, 0.5 = half, 2.0 = double. Capped by Max Balance Usage.',
           },
           fixedAmount: {
             label: 'Fixed Entry Amount (USDC)',
@@ -153,6 +161,41 @@ const T = {
           stopLoss: {
             label: 'Stop-Loss % (0 = disabled)',
             help: 'If the current market price drops this many percent below your buy price, the strategy will automatically sell to limit losses. Example: 50 means sell if price falls 50% from entry (e.g. bought at $0.40, sell at $0.20). Set to 0 to disable stop-loss and let the market resolve naturally.',
+          },
+          sessionStopLoss: {
+            label: 'Session Stop-Loss % (0 = disabled)',
+            help: 'Auto-pause the strategy if total P&L for the current session drops below this percentage of the starting balance. Example: 20 means pause if you lose more than 20% of your balance since the strategy started. Set to 0 to disable. Resets each time the strategy is restarted.',
+          },
+          minVolume: {
+            label: 'Min Market Volume (USDC, 0 = disabled)',
+            help: 'Skip markets whose total traded volume is below this threshold. Helps avoid illiquid markets with wide spreads. Set to 0 to enter any market regardless of volume.',
+          },
+          allowedTags: {
+            label: 'Allowed Tags (empty = all)',
+            help: 'Comma-separated tag slugs to restrict which markets are entered (e.g. "crypto,politics,sports"). If set, only markets matching at least one of these tags are traded. Leave empty to allow all market categories.',
+            placeholder: 'crypto, politics, sports',
+          },
+          marketWhitelist: {
+            label: 'Market Whitelist (empty = all)',
+            help: 'Comma-separated conditionIds to exclusively enter. When set, only these specific markets are traded and all others are ignored. Leave empty to allow all markets.',
+            placeholder: '0xabc123..., 0xdef456...',
+          },
+          marketBlacklist: {
+            label: 'Market Blacklist',
+            help: 'Comma-separated conditionIds to never enter, regardless of other filters. Useful for permanently excluding specific markets.',
+            placeholder: '0xabc123..., 0xdef456...',
+          },
+          kellyEnabled: {
+            label: 'Kelly Criterion Sizing',
+            help: 'When enabled, position size is computed using the Kelly formula (f = (b·p − q) / b) based on your historical win rate and average win/loss ratio. Requires a minimum number of resolved trades before activating — falls back to standard sizing until then.',
+          },
+          kellyMaxFraction: {
+            label: 'Kelly Max Fraction (e.g. 0.25 = 25%)',
+            help: 'Caps the Kelly fraction at this value to prevent over-betting. Full Kelly is mathematically optimal but volatile in practice — a half-Kelly (0.5 × full) or a hard cap like 0.25 is recommended.',
+          },
+          kellyMinTrades: {
+            label: 'Kelly Min Trades Before Activating',
+            help: 'Minimum number of resolved trades required before Kelly sizing is applied. Uses your configured size mode until this threshold is reached.',
           },
         },
       },
@@ -314,6 +357,14 @@ const T = {
       telegram: 'Telegram',
       system: 'System',
       tradingMode: 'Trading Mode',
+      exportSettings: 'Export JSON',
+      importSettings: 'Import JSON',
+      history: 'History',
+      historyHelp: 'Tracks every settings change with its previous and new values. Updated automatically.',
+      historyKey: 'Setting',
+      historyOld: 'Old value',
+      historyNew: 'New value',
+      historyWhen: 'Changed at',
     },
 
     tradingMode: {
@@ -377,6 +428,30 @@ const T = {
       help: 'Cumulative profit/loss over time for each strategy. Each point on the chart represents a resolved market. Green area = profit; red area = loss. The chart updates automatically as markets resolve.',
       noData: 'No performance data yet. Performance is recorded when markets resolve.',
     },
+
+    backtest: {
+      title: 'Backtest',
+      help: 'Simulate different stop-loss, take-profit, and position size parameters against your historical closed positions.',
+      description: 'Replay historical closed positions with custom risk parameters to evaluate how different settings would have performed. Results are estimates based on entry price and final market resolution.',
+      strategy: 'Strategy',
+      useDryRunData: 'Use Dry-Run Data',
+      stopLoss: 'Stop-Loss %',
+      stopLossHelp: 'Simulate early exit on losing positions at this % below entry price. Set 0 to use the original outcome (full loss).',
+      takeProfit: 'Take-Profit %',
+      takeProfitHelp: 'Simulate early exit on winning positions at this % above entry price. Set 0 to hold until full resolution.',
+      positionSize: 'Position Size (USDC)',
+      positionSizeHelp: 'Normalize all trades to this fixed USDC size. Set 0 to use original sizes.',
+      run: 'Run Backtest',
+      results: 'Results',
+      noData: 'No closed positions found for the selected filters.',
+      totalTrades: 'Total Trades',
+      winRate: 'Win Rate',
+      avgPnl: 'Avg P&L / Trade',
+      maxDrawdown: 'Max Drawdown',
+      sharpe: 'Sharpe Ratio',
+      totalPnl: 'Total P&L',
+      disclaimer: 'Results are simulated estimates. Stop-loss and take-profit prices assume monotonic price movement from entry to resolution.',
+    },
   },
 
   pt: {
@@ -389,6 +464,7 @@ const T = {
       logs: 'Registros',
       settings: 'Configurações',
       strategies: 'Estratégias',
+      backtest: 'Backtest',
     },
 
     common: {
@@ -419,6 +495,8 @@ const T = {
       allStatuses: 'Todos os status',
       allStrategies: 'Todas as estratégias',
       noData: 'Nenhum dado encontrado',
+      connections: 'Conexões',
+      checked: 'verificado',
     },
 
     header: {
@@ -468,10 +546,15 @@ const T = {
           },
           sizeMode: {
             label: 'Modo de Tamanho',
-            help: '"Valor fixo": sempre entra com o valor exato configurado em USDC, independente do quanto o trader investiu. "Percentual do máximo": usa MAX_POSITION_SIZE como base e aplica o percentual. "Percentual do saldo": usa o saldo atual como base.',
+            help: '"Valor fixo": sempre entra com o valor exato configurado em USDC. "Proporcional": espelha o tamanho da ordem do trader multiplicado por um fator. "Percentual do máximo": usa MAX_POSITION_SIZE como base. "Percentual do saldo": usa o saldo atual como base.',
             optFixed: 'Valor fixo (USDC)',
+            optProportional: 'Proporcional ao trader',
             optPercentage: 'Percentual do máximo',
             optBalance: 'Percentual do saldo',
+          },
+          proportionalFactor: {
+            label: 'Fator Proporcional',
+            help: 'Multiplicador aplicado ao tamanho da ordem do trader quando o Modo é "Proporcional". 1.0 = mesmo tamanho, 0.5 = metade, 2.0 = dobro. Limitado pelo Uso Máximo do Saldo.',
           },
           fixedAmount: {
             label: 'Valor de Entrada Fixo (USDC)',
@@ -526,6 +609,41 @@ const T = {
           stopLoss: {
             label: 'Stop-Loss % (0 = desabilitado)',
             help: 'Se o preço atual do mercado cair esse percentual abaixo do preço de compra, a estratégia venderá automaticamente para limitar as perdas. Exemplo: 50 significa vender se o preço cair 50% da entrada (ex: comprou a $0,40, vende a $0,20). Defina como 0 para desabilitar o stop-loss e deixar o mercado resolver naturalmente.',
+          },
+          sessionStopLoss: {
+            label: 'Stop-Loss de Sessão % (0 = desabilitado)',
+            help: 'Pausa a estratégia automaticamente se o P&L total da sessão atual cair abaixo desse percentual do saldo inicial. Exemplo: 20 significa pausar se perder mais de 20% do saldo desde que a estratégia iniciou. Defina como 0 para desabilitar. Reseta cada vez que a estratégia é reiniciada.',
+          },
+          minVolume: {
+            label: 'Volume Mínimo do Mercado (USDC, 0 = desabilitado)',
+            help: 'Ignora mercados cujo volume total negociado está abaixo desse valor. Ajuda a evitar mercados ilíquidos com spreads altos. Defina como 0 para entrar em qualquer mercado independente do volume.',
+          },
+          allowedTags: {
+            label: 'Tags Permitidas (vazio = todas)',
+            help: 'Tags separadas por vírgula para restringir quais mercados são entrados (ex: "crypto,politics,sports"). Se definido, apenas mercados com pelo menos uma dessas tags são operados. Deixe vazio para permitir todas as categorias.',
+            placeholder: 'crypto, politics, sports',
+          },
+          marketWhitelist: {
+            label: 'Whitelist de Mercados (vazio = todos)',
+            help: 'conditionIds separados por vírgula para entrar exclusivamente. Quando definido, apenas esses mercados específicos são operados e todos os outros são ignorados. Deixe vazio para permitir todos os mercados.',
+            placeholder: '0xabc123..., 0xdef456...',
+          },
+          marketBlacklist: {
+            label: 'Blacklist de Mercados',
+            help: 'conditionIds separados por vírgula para nunca entrar, independente dos outros filtros. Útil para excluir permanentemente mercados específicos.',
+            placeholder: '0xabc123..., 0xdef456...',
+          },
+          kellyEnabled: {
+            label: 'Sizing pelo Critério de Kelly',
+            help: 'Quando ativo, o tamanho da posição é calculado pela fórmula de Kelly (f = (b·p − q) / b) com base na sua taxa de acerto e razão média de ganho/perda. Requer um número mínimo de trades resolvidos — usa o modo de sizing padrão até atingir esse limiar.',
+          },
+          kellyMaxFraction: {
+            label: 'Fração Máxima do Kelly (ex: 0.25 = 25%)',
+            help: 'Limita a fração de Kelly a este valor para evitar apostas excessivas. O Kelly completo é matematicamente ótimo, mas volátil na prática — um meio-Kelly (0.5×) ou um teto como 0.25 é recomendado.',
+          },
+          kellyMinTrades: {
+            label: 'Trades Mínimos para Ativar o Kelly',
+            help: 'Número mínimo de trades resolvidos antes de o Kelly ser aplicado. Usa o modo de sizing configurado até atingir esse limiar.',
           },
         },
       },
@@ -687,6 +805,14 @@ const T = {
       telegram: 'Telegram',
       system: 'Sistema',
       tradingMode: 'Modo de Trade',
+      exportSettings: 'Exportar JSON',
+      importSettings: 'Importar JSON',
+      history: 'Histórico',
+      historyHelp: 'Registra cada alteração nas configurações com o valor anterior e o novo. Atualizado automaticamente.',
+      historyKey: 'Configuração',
+      historyOld: 'Valor anterior',
+      historyNew: 'Novo valor',
+      historyWhen: 'Alterado em',
     },
 
     tradingMode: {
@@ -749,6 +875,30 @@ const T = {
       title: 'Performance P&L',
       help: 'Lucro/Prejuízo acumulado ao longo do tempo por estratégia. Cada ponto no gráfico representa um mercado resolvido. Área verde = lucro; área vermelha = prejuízo. O gráfico atualiza automaticamente quando os mercados resolvem.',
       noData: 'Ainda não há dados de performance. Os dados são registrados quando os mercados resolvem.',
+    },
+
+    backtest: {
+      title: 'Backtest',
+      help: 'Simule diferentes parâmetros de stop-loss, take-profit e tamanho de posição com base nas suas posições históricas encerradas.',
+      description: 'Reproduza posições históricas encerradas com parâmetros de risco personalizados para avaliar como diferentes configurações teriam performado. Os resultados são estimativas baseadas no preço de entrada e na resolução final do mercado.',
+      strategy: 'Estratégia',
+      useDryRunData: 'Usar Dados de Simulação',
+      stopLoss: 'Stop-Loss %',
+      stopLossHelp: 'Simula saída antecipada em posições perdedoras a este % abaixo do preço de entrada. Defina 0 para usar o resultado original (perda total).',
+      takeProfit: 'Take-Profit %',
+      takeProfitHelp: 'Simula saída antecipada em posições ganhadoras a este % acima do preço de entrada. Defina 0 para aguardar a resolução completa.',
+      positionSize: 'Tamanho da Posição (USDC)',
+      positionSizeHelp: 'Normaliza todas as operações para este tamanho fixo em USDC. Defina 0 para usar os tamanhos originais.',
+      run: 'Executar Backtest',
+      results: 'Resultados',
+      noData: 'Nenhuma posição encerrada encontrada para os filtros selecionados.',
+      totalTrades: 'Total de Operações',
+      winRate: 'Taxa de Acerto',
+      avgPnl: 'P&L Médio / Operação',
+      maxDrawdown: 'Drawdown Máximo',
+      sharpe: 'Índice de Sharpe',
+      totalPnl: 'P&L Total',
+      disclaimer: 'Resultados são estimativas simuladas. Os preços de stop-loss e take-profit assumem movimento de preço monotônico da entrada até a resolução.',
     },
   },
 } as const;

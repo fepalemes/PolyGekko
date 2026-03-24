@@ -26,6 +26,7 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
     COPY_TRADE_TRADER_ADDRESS: getVal(settings, 'COPY_TRADE_TRADER_ADDRESS'),
     COPY_TRADE_SIZE_MODE: getVal(settings, 'COPY_TRADE_SIZE_MODE', 'percentage'),
     COPY_TRADE_FIXED_AMOUNT: getVal(settings, 'COPY_TRADE_FIXED_AMOUNT', '10'),
+    COPY_TRADE_PROPORTIONAL_FACTOR: getVal(settings, 'COPY_TRADE_PROPORTIONAL_FACTOR', '1.0'),
     COPY_TRADE_SIZE_PERCENT: getVal(settings, 'COPY_TRADE_SIZE_PERCENT', '10'),
     COPY_TRADE_MAX_POSITION_SIZE: getVal(settings, 'COPY_TRADE_MAX_POSITION_SIZE', '50'),
     COPY_TRADE_DYNAMIC_SIZING_ENABLED: getVal(settings, 'COPY_TRADE_DYNAMIC_SIZING_ENABLED', 'false'),
@@ -41,6 +42,14 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
     COPY_TRADE_REDEEM_INTERVAL: getVal(settings, 'COPY_TRADE_REDEEM_INTERVAL', '60'),
     COPY_TRADE_SIM_BALANCE: getVal(settings, 'COPY_TRADE_SIM_BALANCE', '1000'),
     COPY_TRADE_STOP_LOSS_PERCENT: getVal(settings, 'COPY_TRADE_STOP_LOSS_PERCENT', '0'),
+    COPY_TRADE_SESSION_STOP_LOSS: getVal(settings, 'COPY_TRADE_SESSION_STOP_LOSS', '0'),
+    COPY_TRADE_MIN_VOLUME: getVal(settings, 'COPY_TRADE_MIN_VOLUME', '0'),
+    COPY_TRADE_ALLOWED_TAGS: getVal(settings, 'COPY_TRADE_ALLOWED_TAGS', ''),
+    COPY_TRADE_MARKET_WHITELIST: getVal(settings, 'COPY_TRADE_MARKET_WHITELIST', ''),
+    COPY_TRADE_MARKET_BLACKLIST: getVal(settings, 'COPY_TRADE_MARKET_BLACKLIST', ''),
+    COPY_TRADE_KELLY_ENABLED: getVal(settings, 'COPY_TRADE_KELLY_ENABLED', 'false'),
+    COPY_TRADE_KELLY_MAX_FRACTION: getVal(settings, 'COPY_TRADE_KELLY_MAX_FRACTION', '0.25'),
+    COPY_TRADE_KELLY_MIN_TRADES: getVal(settings, 'COPY_TRADE_KELLY_MIN_TRADES', '10'),
   });
 
   const set = (key: string, value: string) => setForm(f => ({ ...f, [key]: value }));
@@ -129,14 +138,15 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="fixed">{f.sizeMode.optFixed}</SelectItem>
+                  <SelectItem value="proportional">{f.sizeMode.optProportional}</SelectItem>
                   <SelectItem value="percentage">{f.sizeMode.optPercentage}</SelectItem>
                   <SelectItem value="balance">{f.sizeMode.optBalance}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
-            {/* Fixed Amount — shown only when mode=fixed */}
-            {form.COPY_TRADE_SIZE_MODE === 'fixed' ? (
+            {/* Fixed Amount — mode=fixed */}
+            {form.COPY_TRADE_SIZE_MODE === 'fixed' && (
               <div className="space-y-1.5">
                 <Label htmlFor="fixed-amt" className="flex items-center gap-1.5">
                   {f.fixedAmount.label} <HelpTooltip text={f.fixedAmount.help} />
@@ -145,8 +155,22 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
                   value={form.COPY_TRADE_FIXED_AMOUNT}
                   onChange={e => set('COPY_TRADE_FIXED_AMOUNT', e.target.value)} />
               </div>
-            ) : (
-              /* Size % — shown when mode=percentage or balance */
+            )}
+
+            {/* Proportional Factor — mode=proportional */}
+            {form.COPY_TRADE_SIZE_MODE === 'proportional' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="prop-factor" className="flex items-center gap-1.5">
+                  {f.proportionalFactor.label} <HelpTooltip text={f.proportionalFactor.help} />
+                </Label>
+                <Input id="prop-factor" type="number" min="0.01" step="0.01"
+                  value={form.COPY_TRADE_PROPORTIONAL_FACTOR}
+                  onChange={e => set('COPY_TRADE_PROPORTIONAL_FACTOR', e.target.value)} />
+              </div>
+            )}
+
+            {/* Size % — mode=percentage or balance */}
+            {(form.COPY_TRADE_SIZE_MODE === 'percentage' || form.COPY_TRADE_SIZE_MODE === 'balance') && (
               <div className="space-y-1.5">
                 <Label htmlFor="size-pct" className="flex items-center gap-1.5">
                   {f.sizePercent.label} <HelpTooltip text={f.sizePercent.help} />
@@ -157,8 +181,8 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
               </div>
             )}
 
-            {/* Max Position (hidden in fixed mode) */}
-            {form.COPY_TRADE_SIZE_MODE !== 'fixed' && (
+            {/* Max Position (shown only for percentage modes) */}
+            {(form.COPY_TRADE_SIZE_MODE === 'percentage' || form.COPY_TRADE_SIZE_MODE === 'balance') && (
               <div className="space-y-1.5">
                 <Label htmlFor="max-pos" className="flex items-center gap-1.5">
                   {f.maxPositionSize.label} <HelpTooltip text={f.maxPositionSize.help} />
@@ -274,6 +298,90 @@ export function CopyTradeForm({ settings, onSaved }: { settings: Setting[]; onSa
               value={form.COPY_TRADE_REDEEM_INTERVAL}
               onChange={e => set('COPY_TRADE_REDEEM_INTERVAL', e.target.value)} />
           </div>
+        </div>
+
+        {/* Session Stop-Loss */}
+        <div className="space-y-1.5">
+          <Label htmlFor="session-sl" className="flex items-center gap-1.5">
+            {f.sessionStopLoss.label} <HelpTooltip text={f.sessionStopLoss.help} />
+          </Label>
+          <Input id="session-sl" type="number" min="0" max="100"
+            value={form.COPY_TRADE_SESSION_STOP_LOSS}
+            onChange={e => set('COPY_TRADE_SESSION_STOP_LOSS', e.target.value)} />
+        </div>
+
+        {/* Market Filters */}
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <p className="text-sm font-medium">Market Filters</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="min-vol" className="flex items-center gap-1.5">
+                {f.minVolume.label} <HelpTooltip text={f.minVolume.help} />
+              </Label>
+              <Input id="min-vol" type="number" min="0"
+                value={form.COPY_TRADE_MIN_VOLUME}
+                onChange={e => set('COPY_TRADE_MIN_VOLUME', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="allowed-tags" className="flex items-center gap-1.5">
+                {f.allowedTags.label} <HelpTooltip text={f.allowedTags.help} />
+              </Label>
+              <Input id="allowed-tags" placeholder={f.allowedTags.placeholder}
+                value={form.COPY_TRADE_ALLOWED_TAGS}
+                onChange={e => set('COPY_TRADE_ALLOWED_TAGS', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="whitelist" className="flex items-center gap-1.5">
+                {f.marketWhitelist.label} <HelpTooltip text={f.marketWhitelist.help} />
+              </Label>
+              <Input id="whitelist" placeholder={f.marketWhitelist.placeholder}
+                value={form.COPY_TRADE_MARKET_WHITELIST}
+                onChange={e => set('COPY_TRADE_MARKET_WHITELIST', e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="blacklist" className="flex items-center gap-1.5">
+                {f.marketBlacklist.label} <HelpTooltip text={f.marketBlacklist.help} />
+              </Label>
+              <Input id="blacklist" placeholder={f.marketBlacklist.placeholder}
+                value={form.COPY_TRADE_MARKET_BLACKLIST}
+                onChange={e => set('COPY_TRADE_MARKET_BLACKLIST', e.target.value)} />
+            </div>
+          </div>
+        </div>
+
+        {/* Kelly Criterion */}
+        <div className="space-y-3 rounded-lg border border-border p-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="flex items-center gap-1.5 text-sm font-medium">
+                {f.kellyEnabled.label} <HelpTooltip text={f.kellyEnabled.help} />
+              </p>
+            </div>
+            <Switch
+              checked={form.COPY_TRADE_KELLY_ENABLED === 'true'}
+              onCheckedChange={v => set('COPY_TRADE_KELLY_ENABLED', v.toString())}
+            />
+          </div>
+          {form.COPY_TRADE_KELLY_ENABLED === 'true' && (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="kelly-max-frac" className="flex items-center gap-1.5">
+                  {f.kellyMaxFraction.label} <HelpTooltip text={f.kellyMaxFraction.help} />
+                </Label>
+                <Input id="kelly-max-frac" type="number" min="0.01" max="1" step="0.01"
+                  value={form.COPY_TRADE_KELLY_MAX_FRACTION}
+                  onChange={e => set('COPY_TRADE_KELLY_MAX_FRACTION', e.target.value)} />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="kelly-min-trades" className="flex items-center gap-1.5">
+                  {f.kellyMinTrades.label} <HelpTooltip text={f.kellyMinTrades.help} />
+                </Label>
+                <Input id="kelly-min-trades" type="number" min="1"
+                  value={form.COPY_TRADE_KELLY_MIN_TRADES}
+                  onChange={e => set('COPY_TRADE_KELLY_MIN_TRADES', e.target.value)} />
+              </div>
+            </div>
+          )}
         </div>
 
         <Button onClick={save} disabled={saving} className="w-full">

@@ -89,6 +89,43 @@ export class SimStatsService {
     });
   }
 
+  /**
+   * Returns Kelly criterion parameters for a given strategy.
+   * p = win rate, b = avg_win / avg_loss, n = total resolved trades.
+   */
+  async getKellyParams(strategyType: StrategyType): Promise<{ p: number; b: number; n: number }> {
+    const stats = await this.prisma.simStats.findUnique({ where: { strategyType } });
+    if (!stats) return { p: 0, b: 1, n: 0 };
+
+    const wins = stats.wins;
+    const losses = stats.losses;
+    const n = wins + losses;
+    if (n === 0) return { p: 0, b: 1, n: 0 };
+
+    const p = wins / n;
+
+    const [winSamples, lossSamples] = await Promise.all([
+      this.prisma.performanceSample.findMany({
+        where: { strategyType, outcome: SimOutcome.WIN },
+        select: { pnlDelta: true },
+      }),
+      this.prisma.performanceSample.findMany({
+        where: { strategyType, outcome: SimOutcome.LOSS },
+        select: { pnlDelta: true },
+      }),
+    ]);
+
+    const avgWin = winSamples.length > 0
+      ? winSamples.reduce((s, r) => s + parseFloat(r.pnlDelta.toString()), 0) / winSamples.length
+      : 1;
+    const avgLoss = lossSamples.length > 0
+      ? Math.abs(lossSamples.reduce((s, r) => s + parseFloat(r.pnlDelta.toString()), 0) / lossSamples.length)
+      : 1;
+
+    const b = avgLoss > 0 ? avgWin / avgLoss : 1;
+    return { p, b, n };
+  }
+
   async reset(strategyType: StrategyType) {
     await this.prisma.$transaction([
       this.prisma.simStats.upsert({

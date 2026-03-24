@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { StrategiesController } from './strategies.controller';
 import { StrategiesService } from './strategies.service';
 import { SimStatsService } from './sim-stats.service';
+import { RiskService } from './risk.service';
 import { CopyTradeModule } from './copy-trade/copy-trade.module';
 import { MarketMakerModule } from './market-maker/market-maker.module';
 import { SniperModule } from './sniper/sniper.module';
@@ -12,7 +13,7 @@ import { PolymarketModule } from '../polymarket/polymarket.module';
 @Module({
   imports: [SettingsModule, LogsModule, PolymarketModule, CopyTradeModule, MarketMakerModule, SniperModule],
   controllers: [StrategiesController],
-  providers: [StrategiesService, SimStatsService],
+  providers: [StrategiesService, SimStatsService, RiskService],
   exports: [SimStatsService],
 })
 export class StrategiesModule {}

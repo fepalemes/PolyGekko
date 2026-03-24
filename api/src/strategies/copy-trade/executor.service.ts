@@ -18,6 +18,16 @@ export class ExecutorService {
   private isDryRun = true;
   private buyQueues = new Map<string, Promise<void>>();
 
+  // Serializes all sim-balance read-check-write operations to prevent race conditions
+  private simBalanceMutex: Promise<void> = Promise.resolve();
+  // Prevents concurrent sell processing for the same position
+  private sellLocks = new Set<string>();
+
+  // Session stop loss
+  private sessionStopLossPercent = 0;
+  private sessionStartBalance = 0;
+  private onSessionStopLoss: (() => Promise<void>) | null = null;
+
   constructor(
     private positions: PositionsService,
     private trades: TradesService,
@@ -34,6 +44,46 @@ export class ExecutorService {
   setConfig(config: any, isDryRun: boolean) {
     this.config = config;
     this.isDryRun = isDryRun;
+  }
+
+  initSessionStopLoss(pct: number, startBalance: number, cb: (() => Promise<void>) | null) {
+    this.sessionStopLossPercent = pct;
+    this.sessionStartBalance = startBalance;
+    this.onSessionStopLoss = cb;
+  }
+
+  /**
+   * Serializes all sim-balance mutations so concurrent buys/sells cannot
+   * read the same balance value and produce inconsistent results.
+   */
+  private withSimBalance<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.simBalanceMutex.then(fn);
+    this.simBalanceMutex = next.then(() => {}, () => {});
+    return next;
+  }
+
+  private async checkLargePositionLoss(market: string, pnl: number) {
+    const threshold = await this.settings.getNumber('TELEGRAM_ALERT_LOSS_THRESHOLD', 0);
+    if (threshold <= 0) return;
+    if (Math.abs(pnl) >= threshold) {
+      await this.telegram.notifyAlert(
+        'Copy Trade — Large Loss',
+        `Position closed with a loss of $${Math.abs(pnl).toFixed(2)} on:\n${market}`,
+      );
+    }
+  }
+
+  private async checkSessionStopLoss() {
+    if (!this.sessionStopLossPercent || !this.onSessionStopLoss) return;
+    const startBal = this.sessionStartBalance;
+    if (startBal <= 0) return;
+    const currentBal = this.isDryRun
+      ? await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0)
+      : await this.clob.getBalance().catch(() => 0);
+    const lossPercent = ((startBal - currentBal) / startBal) * 100;
+    if (lossPercent >= this.sessionStopLossPercent) {
+      await this.onSessionStopLoss();
+    }
   }
 
   async onTradeDetected(event: any) {
@@ -58,6 +108,27 @@ export class ExecutorService {
 
   private async handleBuy(conditionId: string, tokenId: string, event: any) {
     try {
+      // ── Blacklist / Whitelist (before any API calls) ────────────────────────
+      if (this.config.marketBlacklist?.length && this.config.marketBlacklist.includes(conditionId)) {
+        await this.logs.info(StrategyType.COPY_TRADE, `Market ${conditionId} is blacklisted — skipping`);
+        return;
+      }
+      if (this.config.marketWhitelist?.length && !this.config.marketWhitelist.includes(conditionId)) {
+        await this.logs.info(StrategyType.COPY_TRADE, `Market ${conditionId} not in whitelist — skipping`);
+        return;
+      }
+
+      // ── Global exposure cap ─────────────────────────────────────────────────
+      const maxExposure = await this.settings.getGlobalMaxExposure();
+      if (maxExposure > 0) {
+        const totalExposure = await this.positions.getTotalOpenExposure(this.isDryRun);
+        if (totalExposure >= maxExposure) {
+          await this.logs.warn(StrategyType.COPY_TRADE,
+            `[EXPOSURE CAP] Total open exposure $${totalExposure.toFixed(2)} >= max $${maxExposure} — skipping`);
+          return;
+        }
+      }
+
       const maxPerMin = await this.settings.getGlobalMaxEntriesPerMinute();
       if (maxPerMin > 0) {
         const allowed = await this.positions.acquireGlobalEntry(maxPerMin, 60);
@@ -83,7 +154,32 @@ export class ExecutorService {
         return;
       }
 
-      const size = await this.calculateSize();
+      // ── Volume filter ───────────────────────────────────────────────────────
+      if (this.config.minVolume > 0) {
+        const vol = parseFloat(market.volume || market.volume24hr || '0');
+        if (vol < this.config.minVolume) {
+          await this.logs.info(StrategyType.COPY_TRADE,
+            `Skipping ${market.question}: volume $${vol.toFixed(0)} < min $${this.config.minVolume}`);
+          return;
+        }
+      }
+
+      // ── Tag filter ──────────────────────────────────────────────────────────
+      if (this.config.allowedTags?.length) {
+        const marketTags: string[] = (market.tags || []).map((t: any) =>
+          (t.slug || t.label || t.id || '').toLowerCase(),
+        );
+        const hasAllowedTag = this.config.allowedTags.some((tag: string) =>
+          marketTags.includes(tag.toLowerCase()),
+        );
+        if (!hasAllowedTag) {
+          await this.logs.info(StrategyType.COPY_TRADE,
+            `Skipping ${market.question}: tags [${marketTags.join(', ')}] not in allowed list`);
+          return;
+        }
+      }
+
+      const size = await this.calculateSize(event.size);
       if (size <= 0) {
         const balance = await this.getAvailableBalance();
         const exposure = await this.getCurrentExposure();
@@ -128,11 +224,20 @@ export class ExecutorService {
       await this.logs.info(StrategyType.COPY_TRADE, `BUY ${outcome} | ${market.question} | ${shares.toFixed(2)} shares @ $${price.toFixed(4)} | $${size.toFixed(2)}`);
 
       if (this.isDryRun) {
-        const currentBalance = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
         const minBal = await this.settings.getGlobalWalletMargin();
-        
-        if (currentBalance < size || currentBalance - size < minBal) {
-          await this.logs.warn(StrategyType.COPY_TRADE, `[SIM] Order would leave simulation balance below minimum $${minBal} — skipping (balance: $${currentBalance.toFixed(2)})`);
+
+        // Atomically check balance and deduct — prevents concurrent buys racing on the same value
+        let balanceAfterBuy = 0;
+        const canAfford = await this.withSimBalance(async () => {
+          const bal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
+          if (bal < size || bal - size < minBal) return false;
+          await this.settings.set('COPY_TRADE_SIM_BALANCE', (bal - size).toFixed(2));
+          balanceAfterBuy = bal - size;
+          return true;
+        });
+
+        if (!canAfford) {
+          await this.logs.warn(StrategyType.COPY_TRADE, `[SIM] Insufficient sim balance for $${size.toFixed(2)} (min margin $${minBal}) — skipping`);
           return;
         }
 
@@ -161,16 +266,12 @@ export class ExecutorService {
           strategyType: StrategyType.COPY_TRADE,
         });
         await this.simStats.recordBuy(StrategyType.COPY_TRADE);
-        // Deduct from sim balance
-        const updatedBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);
-        await this.settings.set('COPY_TRADE_SIM_BALANCE', (updatedBal - size).toFixed(2));
         this.events.emitPositionUpdate(pos);
         this.events.emitTradeExecuted({ side: 'BUY', market: market.question, shares, price, isDryRun: true });
-        const newBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0);
         this.telegram.notifyBuy({
           strategy: 'COPY_TRADE', isDryRun: true,
           market: market.question, size, price, shares,
-          balance: newBal,
+          balance: balanceAfterBuy,
           endTime: new Date(endTime),
         });
         return;
@@ -251,6 +352,14 @@ export class ExecutorService {
   }
 
   private async handleSell(conditionId: string, tokenId: string, event: any) {
+    // Prevent concurrent sell processing for the same position
+    const lockKey = conditionId || tokenId;
+    if (this.sellLocks.has(lockKey)) {
+      await this.logs.warn(StrategyType.COPY_TRADE, `SELL already in progress for ${lockKey} — skipping duplicate`);
+      return;
+    }
+    this.sellLocks.add(lockKey);
+
     try {
       // Primary lookup by conditionId; fallback by tokenId if conditionId is missing
       let position = conditionId ? await this.positions.findByConditionId(conditionId) : null;
@@ -304,19 +413,24 @@ export class ExecutorService {
           status: 'SOLD',
           resolvedPnl: pnl,
         });
-        // Credit balance back
-        const currentBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0);
-        await this.settings.set('COPY_TRADE_SIM_BALANCE', (currentBal + proceeds).toFixed(2));
+        // Atomically credit balance back — prevents concurrent sells from double-crediting
+        const balanceAfterSell = await this.withSimBalance(async () => {
+          const bal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0);
+          const updated = bal + proceeds;
+          await this.settings.set('COPY_TRADE_SIM_BALANCE', updated.toFixed(2));
+          return updated;
+        });
         await this.simStats[pnl >= 0 ? 'recordWin' : 'recordLoss'](StrategyType.COPY_TRADE, pnl, position.market);
         this.events.emitPositionUpdate({ ...position, status: 'SOLD', resolvedPnl: pnl });
         this.events.emitTradeExecuted({ side: 'SELL', market: position.market, shares, price: sellPrice, isDryRun: true });
-        const newBal = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 0);
         this.telegram.notifySell({
           strategy: 'COPY_TRADE', isDryRun: true,
           market: position.market, shares, price: sellPrice, proceeds, pnl,
           totalCost: parseFloat(position.totalCost.toString()),
-          balance: newBal,
+          balance: balanceAfterSell,
         });
+        if (pnl < 0) await this.checkLargePositionLoss(position.market, pnl);
+        await this.checkSessionStopLoss();
         return;
       }
 
@@ -369,8 +483,12 @@ export class ExecutorService {
         proceeds: actualProceeds, pnl: actualPnl,
         totalCost,
       });
+      if (actualPnl < 0) await this.checkLargePositionLoss(position.market, actualPnl);
+      await this.checkSessionStopLoss();
     } catch (err) {
       await this.logs.error(StrategyType.COPY_TRADE, `handleSell error: ${err.message}`, { conditionId });
+    } finally {
+      this.sellLocks.delete(lockKey);
     }
   }
 
@@ -389,7 +507,7 @@ export class ExecutorService {
     return openPositions.reduce((sum, p) => sum + parseFloat(p.totalCost.toString()), 0);
   }
 
-  private async calculateSize(): Promise<number> {
+  private async calculateSize(traderSize?: number): Promise<number> {
     const balance = await this.getAvailableBalance();
     const maxExposure = balance * (this.config.maxBalanceUsagePercent / 100);
     const currentExposure = await this.getCurrentExposure();
@@ -398,10 +516,23 @@ export class ExecutorService {
     if (remaining <= 0) return 0;
 
     let tradeSize: number;
-    if (this.config.dynamicSizingEnabled) {
+
+    if (this.config.kellyEnabled) {
+      const kellySize = await this.computeKellySize(balance);
+      if (kellySize !== null) {
+        tradeSize = kellySize;
+      } else if (this.config.dynamicSizingEnabled) {
+        tradeSize = Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2));
+      } else if (this.config.sizeMode === 'fixed') {
+        tradeSize = this.config.fixedAmount;
+      } else {
+        tradeSize = this.config.maxPositionSize * (this.config.sizePercent / 100);
+      }
+    } else if (this.config.dynamicSizingEnabled) {
       tradeSize = Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2));
+    } else if (this.config.sizeMode === 'proportional' && traderSize && traderSize > 0) {
+      tradeSize = traderSize * (this.config.proportionalFactor ?? 1.0);
     } else if (this.config.sizeMode === 'fixed') {
-      // Fixed dollar amount — always enter with exactly this amount regardless of trader's size
       tradeSize = this.config.fixedAmount;
     } else if (this.config.sizeMode === 'balance') {
       tradeSize = balance * (this.config.sizePercent / 100);
@@ -411,6 +542,36 @@ export class ExecutorService {
     }
 
     return Math.min(tradeSize, remaining);
+  }
+
+  /**
+   * Computes Kelly criterion position size.
+   * Returns null if there are insufficient trades to compute a reliable Kelly fraction.
+   * Formula: f* = (b*p - q) / b, where p=win rate, q=1-p, b=avg_win/avg_loss.
+   */
+  private async computeKellySize(balance: number): Promise<number | null> {
+    const minTrades = this.config.kellyMinTrades ?? 10;
+    const { p, b, n } = await this.simStats.getKellyParams(StrategyType.COPY_TRADE);
+
+    if (n < minTrades) return null;
+
+    const q = 1 - p;
+    const kelly = (b * p - q) / b;
+
+    if (kelly <= 0) {
+      await this.logs.info(StrategyType.COPY_TRADE,
+        `[KELLY] Negative fraction (${kelly.toFixed(3)}) — edge is negative, skipping entry`);
+      return 0; // negative edge: don't trade
+    }
+
+    const maxFraction = this.config.kellyMaxFraction ?? 0.25;
+    const fraction = Math.min(kelly, maxFraction);
+    const size = balance * fraction;
+
+    await this.logs.info(StrategyType.COPY_TRADE,
+      `[KELLY] p=${(p * 100).toFixed(1)}% b=${b.toFixed(2)} f=${(kelly * 100).toFixed(1)}% → capped at ${(fraction * 100).toFixed(1)}% → $${size.toFixed(2)}`);
+
+    return size;
   }
 
   private async waitForGTCFill(

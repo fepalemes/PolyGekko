@@ -6,6 +6,15 @@ const GAMMA_BASE = 'https://gamma-api.polymarket.com';
 export class GammaService {
   private readonly logger = new Logger(GammaService.name);
 
+  async ping(): Promise<boolean> {
+    try {
+      const resp = await fetch(`${GAMMA_BASE}/markets?limit=1`, { signal: AbortSignal.timeout(5000) });
+      return resp.ok;
+    } catch {
+      return false;
+    }
+  }
+
   async getMarket(conditionId: string): Promise<any> {
     try {
       const resp = await fetch(`${GAMMA_BASE}/markets/${conditionId}`);

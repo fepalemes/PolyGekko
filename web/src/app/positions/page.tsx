@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
-import { getPositions } from '@/lib/api';
+import { getPositions, getUnrealizedPnl } from '@/lib/api';
 import { formatUSD, formatNumber, truncate, strategyLabel } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useLang } from '@/lib/i18n';
@@ -43,6 +43,16 @@ export default function PositionsPage() {
       isDryRun: dryRunStr,
     }),
     refetchInterval: 10000,
+  });
+
+  const { data: unrealizedPnlMap = {} } = useQuery({
+    queryKey: ['unrealized-pnl', dryRunStr],
+    queryFn: async () => {
+      const data = await getUnrealizedPnl(dryRunStr);
+      return Object.fromEntries(data.map(d => [d.positionId, d]));
+    },
+    refetchInterval: 30000,
+    enabled: filterStatus === 'ALL' || filterStatus === 'OPEN',
   });
 
   const openCount    = positions.filter(pos => pos.status === 'OPEN').length;
@@ -157,6 +167,13 @@ export default function PositionsPage() {
                           {pos.resolvedPnl != null ? (
                             <span className={parseFloat(pos.resolvedPnl) >= 0 ? 'text-green-400' : 'text-red-400'}>
                               {parseFloat(pos.resolvedPnl) >= 0 ? '+' : ''}{formatUSD(pos.resolvedPnl)}
+                            </span>
+                          ) : pos.status === 'OPEN' && unrealizedPnlMap[pos.id] ? (
+                            <span className={`${(unrealizedPnlMap[pos.id].unrealizedPnl ?? 0) >= 0 ? 'text-green-400/70' : 'text-red-400/70'} italic`}
+                              title={`Live price: $${(unrealizedPnlMap[pos.id].currentPrice ?? 0).toFixed(4)} · Value: $${(unrealizedPnlMap[pos.id].currentValue ?? 0).toFixed(2)}`}>
+                              {(unrealizedPnlMap[pos.id].unrealizedPnl ?? 0) >= 0 ? '+' : ''}
+                              {formatUSD(unrealizedPnlMap[pos.id].unrealizedPnl ?? 0)}
+                              <span className="ml-1 text-[10px] opacity-60">~</span>
                             </span>
                           ) : (
                             <span className="text-muted-foreground">–</span>

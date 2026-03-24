@@ -55,6 +55,17 @@ model Setting {
   updatedAt   DateTime @updatedAt
 }
 
+model SettingHistory {
+  id        Int      @id @default(autoincrement())
+  key       String
+  oldValue  String?
+  newValue  String
+  changedAt DateTime @default(now())
+
+  @@index([key])
+  @@index([changedAt])
+}
+
 model StrategyConfig {
   id        Int          @id @default(autoincrement())
   type      StrategyType @unique

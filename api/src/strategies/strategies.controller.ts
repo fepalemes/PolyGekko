@@ -14,6 +14,12 @@ export class StrategiesController {
     return this.strategiesService.getAllStatus();
   }
 
+  @Get('health')
+  @ApiOperation({ summary: 'Check connectivity to Polymarket CLOB and Gamma APIs' })
+  getHealth() {
+    return this.strategiesService.getHealth();
+  }
+
   @Get('sim-stats')
   @ApiOperation({ summary: 'Get simulation statistics' })
   getSimStats() {
@@ -29,6 +35,18 @@ export class StrategiesController {
     @Query('limit') limit?: string,
   ) {
     return this.strategiesService.getPerformanceSamples(strategy, limit ? +limit : 200);
+  }
+
+  @Post('backtest')
+  @ApiOperation({ summary: 'Run a parameter backtest against historical closed positions' })
+  runBacktest(@Body() body: {
+    strategyType?: string;
+    stopLossPercent?: number;
+    takeProfitPercent?: number;
+    positionSizeUsdc?: number;
+    isDryRun?: boolean;
+  }) {
+    return this.strategiesService.runBacktest(body);
   }
 
   @Delete('sim-stats/:type')
