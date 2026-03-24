@@ -45,11 +45,18 @@ export const bulkUpdateSettings = (settings: Array<{ key: string; value: string 
   apiFetch('/settings', { method: 'PATCH', body: JSON.stringify(settings) });
 export const getSettingsHistory = (limit?: number) =>
   apiFetch<Array<{ id: number; key: string; oldValue: string | null; newValue: string; changedAt: string }>>(`/settings/history${limit ? `?limit=${limit}` : ''}`);
-export const exportSettings = () =>
-  apiFetch<{ exportedAt: string; settings: Record<string, string> }>('/settings/export');
-export const importSettings = (settings: Record<string, string>) =>
+export type ExportedSettings = {
+  exportedAt: string;
+  categories: Array<{
+    category: string;
+    label: string;
+    fields: Array<{ key: string; value: string; description: string }>;
+  }>;
+};
+export const exportSettings = () => apiFetch<ExportedSettings>('/settings/export');
+export const importSettings = (body: ExportedSettings | Record<string, string>) =>
   apiFetch<{ imported: number; skipped: number; message: string }>('/settings/import', {
-    method: 'POST', body: JSON.stringify({ settings }),
+    method: 'POST', body: JSON.stringify(body),
   });
 
 // Strategies

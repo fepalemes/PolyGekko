@@ -14,6 +14,81 @@ export class SettingsController {
     return this.settingsService.getAll();
   }
 
+  @Get('history')
+  @ApiOperation({ summary: 'Get settings change history' })
+  getHistory(@Query('limit') limit?: string) {
+    return this.settingsService.getHistory(limit ? +limit : 100);
+  }
+
+  @Get('export')
+  @ApiOperation({ summary: 'Export all settings grouped by category with descriptions' })
+  async exportSettings() {
+    const settings = await this.settingsService.getAll();
+
+    const CATEGORY_LABELS: Record<string, string> = {
+      copy_trade: 'Copy Trade',
+      market_maker: 'Market Maker',
+      sniper: 'Sniper',
+      system: 'System',
+      telegram: 'Telegram',
+    };
+
+    const byCategory = new Map<string, typeof settings>();
+    for (const s of settings) {
+      const cat = s.category ?? 'general';
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat)!.push(s);
+    }
+
+    const categories = Array.from(byCategory.entries()).map(([category, fields]) => ({
+      category,
+      label: CATEGORY_LABELS[category] ?? category,
+      fields: fields.map(s => ({
+        key: s.key,
+        value: s.value,
+        description: s.description ?? '',
+      })),
+    }));
+
+    return { exportedAt: new Date().toISOString(), categories };
+  }
+
+  @Post('import')
+  @ApiOperation({ summary: 'Import settings — accepts both the new grouped format and the legacy flat format' })
+  async importSettings(@Body() body: any) {
+    // Normalize: accept { categories: [...] } (new) or { settings: { KEY: VALUE } } (legacy) or plain { KEY: VALUE }
+    let flat: Record<string, string>;
+
+    if (Array.isArray(body?.categories)) {
+      // New format: { categories: [{ fields: [{ key, value }] }] }
+      flat = {};
+      for (const cat of body.categories) {
+        for (const field of cat.fields ?? []) {
+          if (field.key) flat[field.key] = String(field.value ?? '');
+        }
+      }
+    } else if (body?.settings && typeof body.settings === 'object') {
+      // Legacy format: { settings: { KEY: VALUE } }
+      flat = body.settings;
+    } else if (typeof body === 'object' && !Array.isArray(body)) {
+      // Bare flat object: { KEY: VALUE }
+      flat = body;
+    } else {
+      return { imported: 0, skipped: 0, message: 'Invalid payload format.' };
+    }
+
+    const all = await this.settingsService.getAll();
+    const knownKeys = new Set(all.map(s => s.key));
+    const entries = Object.entries(flat).filter(([key]) => knownKeys.has(key));
+    await this.settingsService.bulkSet(entries.map(([key, value]) => ({ key, value })));
+    const skipped = Object.keys(flat).length - entries.length;
+    return {
+      imported: entries.length,
+      skipped,
+      message: `Imported ${entries.length} settings${skipped > 0 ? `, skipped ${skipped} unknown keys` : ''}.`,
+    };
+  }
+
   @Get(':key')
   @ApiOperation({ summary: 'Get setting by key' })
   getOne(@Param('key') key: string) {
@@ -30,39 +105,5 @@ export class SettingsController {
   @ApiOperation({ summary: 'Bulk update settings' })
   bulkUpdate(@Body() body: Array<{ key: string; value: string }>) {
     return this.settingsService.bulkSet(body);
-  }
-
-  @Get('history')
-  @ApiOperation({ summary: 'Get settings change history' })
-  getHistory(@Query('limit') limit?: string) {
-    return this.settingsService.getHistory(limit ? +limit : 100);
-  }
-
-  @Get('export')
-  @ApiOperation({ summary: 'Export all settings as JSON' })
-  async exportSettings() {
-    const settings = await this.settingsService.getAll();
-    return {
-      exportedAt: new Date().toISOString(),
-      settings: Object.fromEntries(settings.map(s => [s.key, s.value])),
-    };
-  }
-
-  @Post('import')
-  @ApiOperation({ summary: 'Import settings from a JSON export (keys that exist will be overwritten; unknown keys are ignored)' })
-  async importSettings(@Body() body: { settings: Record<string, string> }) {
-    if (!body?.settings || typeof body.settings !== 'object') {
-      return { imported: 0, message: 'Invalid payload — expected { settings: { KEY: VALUE } }' };
-    }
-    const all = await this.settingsService.getAll();
-    const knownKeys = new Set(all.map(s => s.key));
-    const entries = Object.entries(body.settings).filter(([key]) => knownKeys.has(key));
-    await this.settingsService.bulkSet(entries.map(([key, value]) => ({ key, value: String(value) })));
-    const skipped = Object.keys(body.settings).length - entries.length;
-    return {
-      imported: entries.length,
-      skipped,
-      message: `Imported ${entries.length} settings${skipped > 0 ? `, skipped ${skipped} unknown keys` : ''}.`,
-    };
   }
 }
