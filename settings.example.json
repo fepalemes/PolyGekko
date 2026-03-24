@@ -1,0 +1,455 @@
+{
+  "exportedAt": "2026-01-01T00:00:00.000Z",
+  "categories": [
+    {
+      "category": "copy_trade",
+      "label": "Copy Trade",
+      "fields": [
+        {
+          "key": "COPY_TRADE_DRY_RUN",
+          "value": "true",
+          "description": "Simulation mode — no real orders placed"
+        },
+        {
+          "key": "COPY_TRADE_TRADER_ADDRESS",
+          "value": "0xYourTargetTraderAddress",
+          "description": "Proxy wallet address of the trader to copy"
+        },
+        {
+          "key": "COPY_TRADE_SIZE_MODE",
+          "value": "percentage",
+          "description": "\"percentage\", \"balance\", or \"fixed\""
+        },
+        {
+          "key": "COPY_TRADE_FIXED_AMOUNT",
+          "value": "10",
+          "description": "Fixed USDC amount per trade when SIZE_MODE=fixed"
+        },
+        {
+          "key": "COPY_TRADE_SIZE_PERCENT",
+          "value": "10",
+          "description": "Percentage of MAX_POSITION_SIZE (or balance) per trade"
+        },
+        {
+          "key": "COPY_TRADE_MAX_POSITION_SIZE",
+          "value": "10",
+          "description": "Max USDC per position"
+        },
+        {
+          "key": "COPY_TRADE_MIN_ALLOCATION",
+          "value": "0.50",
+          "description": "Minimum USDC to allocate dynamically"
+        },
+        {
+          "key": "COPY_TRADE_MAX_ALLOCATION",
+          "value": "5",
+          "description": "Maximum USDC to allocate dynamically"
+        },
+        {
+          "key": "COPY_TRADE_DYNAMIC_SIZING_ENABLED",
+          "value": "false",
+          "description": "Enable dynamic random sizing"
+        },
+        {
+          "key": "COPY_TRADE_PROPORTIONAL_FACTOR",
+          "value": "1.0",
+          "description": "When SIZE_MODE=proportional, multiply the trader's trade size by this factor (1.0 = same size, 0.5 = half, 2.0 = double)"
+        },
+        {
+          "key": "COPY_TRADE_AUTO_SELL_ENABLED",
+          "value": "true",
+          "description": "Place auto limit-sell after entry"
+        },
+        {
+          "key": "COPY_TRADE_AUTO_SELL_PROFIT_PERCENT",
+          "value": "40",
+          "description": "Take-profit target % above buy price"
+        },
+        {
+          "key": "COPY_TRADE_STOP_LOSS_PERCENT",
+          "value": "10",
+          "description": "Stop-loss % below buy price (0 = disabled)"
+        },
+        {
+          "key": "COPY_TRADE_SESSION_STOP_LOSS",
+          "value": "15",
+          "description": "Auto-pause if session P&L drops below this % of starting balance (0 = disabled)"
+        },
+        {
+          "key": "COPY_TRADE_MAX_BALANCE_USAGE_PERCENT",
+          "value": "60",
+          "description": "Max % of total balance to keep in open positions"
+        },
+        {
+          "key": "COPY_TRADE_MIN_LIVE_BALANCE",
+          "value": "10",
+          "description": "Minimum USDC to keep in wallet at all times — never deploy below this (live mode only)"
+        },
+        {
+          "key": "COPY_TRADE_MIN_ENTRY_AMOUNT",
+          "value": "0.50",
+          "description": "Minimum USDC to spend on an entry — never skips if size >= this"
+        },
+        {
+          "key": "COPY_TRADE_MIN_MARKET_TIME_LEFT",
+          "value": "90",
+          "description": "Skip buy if market closes within N seconds"
+        },
+        {
+          "key": "COPY_TRADE_GTC_FALLBACK_TIMEOUT",
+          "value": "60",
+          "description": "Seconds to wait for GTC fill before cancelling"
+        },
+        {
+          "key": "COPY_TRADE_MAX_RETRIES",
+          "value": "3",
+          "description": "Max retries on order failure"
+        },
+        {
+          "key": "COPY_TRADE_SELL_MODE",
+          "value": "limit",
+          "description": "\"market\" or \"limit\""
+        },
+        {
+          "key": "COPY_TRADE_REDEEM_INTERVAL",
+          "value": "1",
+          "description": "Seconds between price-check / redemption cycles"
+        },
+        {
+          "key": "COPY_TRADE_SIM_BALANCE",
+          "value": "1000",
+          "description": "Fictitious balance for simulation mode (USDC)"
+        },
+        {
+          "key": "COPY_TRADE_MIN_VOLUME",
+          "value": "0",
+          "description": "Minimum total trading volume (USDC) a market must have to be entered. 0 = disabled."
+        },
+        {
+          "key": "COPY_TRADE_ALLOWED_TAGS",
+          "value": "",
+          "description": "Comma-separated tag slugs to allow (e.g. \"crypto,politics\"). Empty = all markets allowed."
+        },
+        {
+          "key": "COPY_TRADE_MARKET_WHITELIST",
+          "value": "",
+          "description": "Comma-separated conditionIds to exclusively enter. Empty = all markets allowed."
+        },
+        {
+          "key": "COPY_TRADE_MARKET_BLACKLIST",
+          "value": "",
+          "description": "Comma-separated conditionIds to never enter."
+        },
+        {
+          "key": "COPY_TRADE_KELLY_ENABLED",
+          "value": "true",
+          "description": "Use Kelly criterion for dynamic position sizing based on historical win rate."
+        },
+        {
+          "key": "COPY_TRADE_KELLY_MIN_TRADES",
+          "value": "10",
+          "description": "Minimum resolved trades before Kelly kicks in."
+        },
+        {
+          "key": "COPY_TRADE_KELLY_MAX_FRACTION",
+          "value": "0.25",
+          "description": "Maximum fraction of balance Kelly criterion can allocate per trade (0.25 = max 25%)."
+        },
+        {
+          "key": "COPY_TRADE_RUNNING",
+          "value": "false",
+          "description": "Whether the strategy is running (auto-restored on restart)"
+        }
+      ]
+    },
+    {
+      "category": "market_maker",
+      "label": "Market Maker",
+      "fields": [
+        {
+          "key": "MM_DRY_RUN",
+          "value": "true",
+          "description": "Simulation mode"
+        },
+        {
+          "key": "MM_ASSETS",
+          "value": "btc,eth,sol,xrp,bnb,doge,hype",
+          "description": "Comma-separated assets to trade. Available: btc,eth,sol,xrp,bnb,doge,hype"
+        },
+        {
+          "key": "MM_DURATION",
+          "value": "5m",
+          "description": "\"5m\", \"15m\", \"1h\", or \"4h\""
+        },
+        {
+          "key": "MM_TRADE_SIZE",
+          "value": "5",
+          "description": "USDC per side (minimum $5 on live mode)"
+        },
+        {
+          "key": "MM_SELL_PRICE",
+          "value": "0.60",
+          "description": "Target sell price (0.01-0.99)"
+        },
+        {
+          "key": "MM_SPREAD_PROFIT_TARGET",
+          "value": "0.10",
+          "description": "Take-profit margin above entry price (e.g. 0.10 = 10 cents)"
+        },
+        {
+          "key": "MM_ENTRY_MIN_TOKEN_PRICE",
+          "value": "0.10",
+          "description": "Min midpoint for each token. Avoids very one-sided markets."
+        },
+        {
+          "key": "MM_ENTRY_MAX_TOKEN_PRICE",
+          "value": "0.90",
+          "description": "Max midpoint for each token. Avoids very one-sided markets."
+        },
+        {
+          "key": "MM_ENTRY_MAX_COMBINED",
+          "value": "1.00",
+          "description": "Max combined midpoint (YES+NO) to enter. 1.00 = never enter above fair value."
+        },
+        {
+          "key": "MM_MIN_SPREAD",
+          "value": "0.03",
+          "description": "Minimum spread (1 - combined midpoint) required to enter. 0.03 = require at least 3¢ profit margin."
+        },
+        {
+          "key": "MM_CUT_LOSS_TIME",
+          "value": "35",
+          "description": "Seconds before close to cut loss"
+        },
+        {
+          "key": "MM_EARLY_EXIT_ENABLED",
+          "value": "true",
+          "description": "Exit early if the current combined position value drops below the stop-loss floor"
+        },
+        {
+          "key": "MM_EARLY_EXIT_LOSS_PCT",
+          "value": "30",
+          "description": "Early exit if current position value < cost × (1 - this%). E.g. 30 = exit if value drops to 70% of cost"
+        },
+        {
+          "key": "MM_MAX_ACTIVE_MARKETS",
+          "value": "3",
+          "description": "Maximum number of simultaneously active positions. 0 = unlimited."
+        },
+        {
+          "key": "MM_MAX_POSITION_AGE_HOURS",
+          "value": "0",
+          "description": "Auto-exit a position open for more than N hours. 0 = disabled."
+        },
+        {
+          "key": "MM_BINANCE_TREND_ENABLED",
+          "value": "true",
+          "description": "Use Binance short-term momentum to skew YES/NO capital allocation"
+        },
+        {
+          "key": "MM_BINANCE_KLINE_INTERVAL",
+          "value": "1m",
+          "description": "Kline interval for Binance momentum. Options: 1m, 3m, 5m"
+        },
+        {
+          "key": "MM_BINANCE_KLINE_PERIODS",
+          "value": "3",
+          "description": "Number of klines to compute short-term momentum (3-5 recommended)"
+        },
+        {
+          "key": "MM_MAX_BIAS_PERCENT",
+          "value": "75",
+          "description": "Maximum bias percent (e.g. 75 means up to 75% capital on trending side)"
+        },
+        {
+          "key": "MM_DYNAMIC_SIZING_ENABLED",
+          "value": "false",
+          "description": "Enable dynamic sizing and fractional profit targets"
+        },
+        {
+          "key": "MM_MIN_ALLOCATION",
+          "value": "0.50",
+          "description": "Minimum USDC to allocate dynamically"
+        },
+        {
+          "key": "MM_MAX_ALLOCATION",
+          "value": "5",
+          "description": "Maximum USDC to allocate dynamically"
+        },
+        {
+          "key": "MM_ADAPTIVE_CL",
+          "value": "false",
+          "description": "Enable adaptive cut-loss strategy"
+        },
+        {
+          "key": "MM_ADAPTIVE_MIN_COMBINED",
+          "value": "1.0",
+          "description": "Min combined price for adaptive CL"
+        },
+        {
+          "key": "MM_RECOVERY_BUY",
+          "value": "false",
+          "description": "Enable recovery buy after cut-loss"
+        },
+        {
+          "key": "MM_RECOVERY_THRESHOLD",
+          "value": "0.70",
+          "description": "Min price for recovery buy"
+        },
+        {
+          "key": "MM_POLL_INTERVAL",
+          "value": "1",
+          "description": "Seconds between market detection polls"
+        },
+        {
+          "key": "MM_SIM_BALANCE",
+          "value": "1000",
+          "description": "Fictitious balance for Market Maker simulation mode (USDC)"
+        },
+        {
+          "key": "MM_RUNNING",
+          "value": "false",
+          "description": "Whether the strategy is running (auto-restored on restart)"
+        }
+      ]
+    },
+    {
+      "category": "sniper",
+      "label": "Sniper",
+      "fields": [
+        {
+          "key": "SNIPER_DRY_RUN",
+          "value": "true",
+          "description": "Simulation mode"
+        },
+        {
+          "key": "SNIPER_ASSETS",
+          "value": "eth,btc,sol",
+          "description": "Comma-separated assets to snipe"
+        },
+        {
+          "key": "SNIPER_MAX_SHARES",
+          "value": "50",
+          "description": "Max shares per side per market"
+        },
+        {
+          "key": "SNIPER_TIER1_PRICE",
+          "value": "0.04",
+          "description": "Tier 1 price (4¢) — 20% of capital"
+        },
+        {
+          "key": "SNIPER_TIER2_PRICE",
+          "value": "0.03",
+          "description": "Tier 2 price (3¢) — 30% of capital"
+        },
+        {
+          "key": "SNIPER_TIER3_PRICE",
+          "value": "0.02",
+          "description": "Tier 3 price (2¢) — 50% of capital"
+        },
+        {
+          "key": "SNIPER_PAUSE_ROUNDS_AFTER_WIN",
+          "value": "2",
+          "description": "Rounds to pause asset after a win"
+        },
+        {
+          "key": "SNIPER_VOLUME_SPIKE_PCT",
+          "value": "0",
+          "description": "Min volume increase % since last round to trigger order placement. 0 = disabled."
+        },
+        {
+          "key": "SNIPER_SCHEDULE",
+          "value": "",
+          "description": "Per-asset schedule: \"ETH=11:40-15:40,BTC=09:00-17:00\""
+        },
+        {
+          "key": "SNIPER_MULTIPLIERS",
+          "value": "",
+          "description": "Time-based sizing: \"HH:MM-HH:MM:factor,...\""
+        },
+        {
+          "key": "SNIPER_SIM_BALANCE",
+          "value": "1000",
+          "description": "Fictitious balance for Sniper simulation mode (USDC)"
+        },
+        {
+          "key": "SNIPER_RUNNING",
+          "value": "false",
+          "description": "Whether the strategy is running (auto-restored on restart)"
+        }
+      ]
+    },
+    {
+      "category": "system",
+      "label": "System",
+      "fields": [
+        {
+          "key": "GLOBAL_SIMULATION_MODE",
+          "value": "true",
+          "description": "Applies Simulation mode globally and overrides individual strategy dry-run settings"
+        },
+        {
+          "key": "GLOBAL_WALLET_MARGIN",
+          "value": "5",
+          "description": "Minimum USDC that must remain in the wallet at all times across all strategies (Live mode)"
+        },
+        {
+          "key": "GLOBAL_MAX_EXPOSURE_USDC",
+          "value": "0",
+          "description": "Maximum total USDC deployed in open positions across ALL strategies simultaneously. 0 = disabled."
+        },
+        {
+          "key": "GLOBAL_CIRCUIT_BREAKER_PCT",
+          "value": "20",
+          "description": "Auto-pause ALL strategies if total P&L loss in the window exceeds this % of current balance. 0 = disabled."
+        },
+        {
+          "key": "GLOBAL_CIRCUIT_BREAKER_WINDOW_HOURS",
+          "value": "24",
+          "description": "Time window (hours) used for circuit breaker P&L calculation."
+        },
+        {
+          "key": "GLOBAL_MAX_ENTRIES_PER_MINUTE",
+          "value": "0",
+          "description": "Maximum total entries across all strategies per minute (0 = unlimited)"
+        },
+        {
+          "key": "TRADING_MODE",
+          "value": "custom",
+          "description": "Active trading mode: high | intermediate | low | custom"
+        },
+        {
+          "key": "POLYGON_RPC_URL",
+          "value": "https://polygon-mainnet.g.alchemy.com/v2/YOUR_ALCHEMY_KEY",
+          "description": "Polygon RPC endpoint. Get a free key at https://alchemy.com or https://quicknode.com"
+        }
+      ]
+    },
+    {
+      "category": "telegram",
+      "label": "Telegram",
+      "fields": [
+        {
+          "key": "TELEGRAM_ENABLED",
+          "value": "false",
+          "description": "Enable Telegram notifications"
+        },
+        {
+          "key": "TELEGRAM_BOT_TOKEN",
+          "value": "YOUR_BOT_TOKEN_FROM_BOTFATHER",
+          "description": "Bot token from @BotFather (e.g. 123456789:AAF...)"
+        },
+        {
+          "key": "TELEGRAM_CHAT_ID",
+          "value": "YOUR_CHAT_ID",
+          "description": "Your chat/group ID (use @userinfobot to find it)"
+        },
+        {
+          "key": "TELEGRAM_ALERT_LOSS_THRESHOLD",
+          "value": "0",
+          "description": "Send an immediate alert when a single position closes with a loss larger than this USDC amount. 0 = disabled."
+        }
+      ]
+    }
+  ]
+}
