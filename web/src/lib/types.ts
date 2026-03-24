@@ -81,6 +81,7 @@ export interface Setting {
 export interface StrategyStatus {
   type: StrategyType;
   running: boolean;
+  paused: boolean;
   isDryRun: boolean;
   startedAt?: string | null;
 }

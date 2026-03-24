@@ -6,15 +6,17 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
-import { Trash2, Loader2 } from 'lucide-react';
+import { Trash2, Loader2, Sun, Moon, Menu } from 'lucide-react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getSettingsByCategory, updateSetting, getRealBalance, clearSimData, getStrategiesStatus } from '@/lib/api';
+import { useTheme } from '@/hooks/use-theme';
 
-export function Header({ title }: { title: string }) {
+export function Header({ title, onMenuClick }: { title: string; onMenuClick?: () => void }) {
   const [connected, setConnected] = useState(false);
   const [time, setTime] = useState('');
   const [clearing, setClearing] = useState(false);
   const { lang, setLang, t } = useLang();
+  const { isDark, toggleTheme } = useTheme();
   const qc = useQueryClient();
 
   useEffect(() => {
@@ -56,8 +58,7 @@ export function Header({ title }: { title: string }) {
   const { mutate: toggleSimMode } = useMutation({
     mutationFn: (val: boolean) => updateSetting('GLOBAL_SIMULATION_MODE', val.toString()),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['settings'] });
-      qc.invalidateQueries({ queryKey: ['balance'] });
+      qc.invalidateQueries(); // refresh all data for the new mode
     }
   });
 
@@ -84,9 +85,19 @@ export function Header({ title }: { title: string }) {
   const toggleLang = () => setLang(lang === 'en' ? 'pt' : 'en');
 
   return (
-    <div className="flex h-14 items-center justify-between border-b border-border px-6">
-      <h1 className="text-base font-semibold text-foreground">{title}</h1>
-      <div className="flex items-center gap-4">
+    <div className="flex h-14 items-center justify-between border-b border-border px-4 md:px-6">
+      <div className="flex items-center gap-3">
+        {/* Hamburger — mobile only */}
+        <button
+          className="md:hidden text-muted-foreground hover:text-foreground transition-colors"
+          onClick={onMenuClick}
+          aria-label="Open menu"
+        >
+          <Menu className="h-5 w-5" />
+        </button>
+        <h1 className="text-base font-semibold text-foreground">{title}</h1>
+      </div>
+      <div className="flex items-center gap-2 md:gap-4">
         {/* Simulation / Live Toggle & Clear button */}
         <div className="flex items-center gap-2 border-r border-border pr-4">
           {isSimMode && (
@@ -101,7 +112,7 @@ export function Header({ title }: { title: string }) {
               {clearing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
             </Button>
           )}
-          <Label className="text-xs text-muted-foreground flex items-center gap-1.5 cursor-pointer">
+          <Label className="hidden sm:flex text-xs text-muted-foreground items-center gap-1.5 cursor-pointer">
             {t.header.simMode}
             <HelpTooltip text={anyRunning ? (lang === 'pt' ? 'Pare todas as estratégias para mudar de modo' : 'Stop all strategies to change mode') : t.header.simModeHelp} />
           </Label>
@@ -120,6 +131,15 @@ export function Header({ title }: { title: string }) {
           </div>
         )}
 
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          className="flex items-center justify-center rounded border border-border p-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-foreground"
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+        >
+          {isDark ? <Sun className="h-3.5 w-3.5" /> : <Moon className="h-3.5 w-3.5" />}
+        </button>
+
         {/* Language switcher */}
         <button
           onClick={toggleLang}
@@ -130,14 +150,14 @@ export function Header({ title }: { title: string }) {
           <span className="font-medium">{lang === 'en' ? 'PT' : 'EN'}</span>
         </button>
 
-        {/* Connection status */}
-        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        {/* Connection status — hidden on mobile */}
+        <div className="hidden sm:flex items-center gap-1.5 text-xs text-muted-foreground">
           <div className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-red-500'}`} />
-          {connected ? t.common.connected : t.common.disconnected}
+          <span className="hidden md:inline">{connected ? t.common.connected : t.common.disconnected}</span>
           <HelpTooltip text={t.header.connectedHelp} />
         </div>
 
-        <span className="font-mono text-xs text-muted-foreground">{time}</span>
+        <span className="hidden sm:inline font-mono text-xs text-muted-foreground">{time}</span>
       </div>
     </div>
   );

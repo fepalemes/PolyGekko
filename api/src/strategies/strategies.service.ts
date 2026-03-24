@@ -6,7 +6,7 @@ import { MarketMakerService } from './market-maker/market-maker.service';
 import { SniperService } from './sniper/sniper.service';
 import { SimStatsService } from './sim-stats.service';
 import { ClobService } from '../polymarket/clob.service';
-import { SettingsService } from '../settings/settings.service';
+import { SettingsService, TradingMode, TRADING_MODE_PRESETS } from '../settings/settings.service';
 
 @Injectable()
 export class StrategiesService implements OnApplicationBootstrap {
@@ -77,6 +77,24 @@ export class StrategiesService implements OnApplicationBootstrap {
     }
   }
 
+  async pause(type: string) {
+    switch (type) {
+      case 'COPY_TRADE': return this.copyTrade.pause();
+      case 'MARKET_MAKER': return this.marketMaker.pause();
+      case 'SNIPER': return this.sniper.pause();
+      default: throw new Error(`Unknown strategy: ${type}`);
+    }
+  }
+
+  async resume(type: string) {
+    switch (type) {
+      case 'COPY_TRADE': return this.copyTrade.resume();
+      case 'MARKET_MAKER': return this.marketMaker.resume();
+      case 'SNIPER': return this.sniper.resume();
+      default: throw new Error(`Unknown strategy: ${type}`);
+    }
+  }
+
   async getSimStats() {
     return this.simStats.getAll();
   }
@@ -108,6 +126,16 @@ export class StrategiesService implements OnApplicationBootstrap {
       message: 'All simulation data cleared',
       deleted: { positions: positions.count, trades: trades.count, logs: logs.count, stats: stats.count, samples: samples.count },
     };
+  }
+
+  async getTradingMode() {
+    const mode = await this.settings.getTradingMode();
+    return { mode, presets: TRADING_MODE_PRESETS };
+  }
+
+  async applyTradingMode(mode: TradingMode) {
+    await this.settings.applyTradingMode(mode);
+    return { mode, applied: mode !== 'custom' };
   }
 
   async getBalance(isDryRun: boolean) {

@@ -114,9 +114,18 @@ export class ExecutorService {
         : typeof rawOutcomes === 'string'
           ? (() => { try { return JSON.parse(rawOutcomes); } catch { return ['YES', 'NO']; } })()
           : ['YES', 'NO'];
-      const outcome = outcomesArr[0] || 'YES';
 
-      await this.logs.info(StrategyType.COPY_TRADE, `BUY ${market.question} | ${shares.toFixed(2)} shares @ $${price.toFixed(4)} | $${size.toFixed(2)}`);
+      // Determine which outcome this tokenId corresponds to by matching clobTokenIds
+      const rawTokenIds = market.clobTokenIds;
+      const tokenIds: string[] = Array.isArray(rawTokenIds)
+        ? rawTokenIds
+        : typeof rawTokenIds === 'string'
+          ? (() => { try { return JSON.parse(rawTokenIds); } catch { return []; } })()
+          : [];
+      const tokenIndex = tokenIds.findIndex(t => t === tokenId);
+      const outcome = tokenIndex >= 0 ? (outcomesArr[tokenIndex] ?? outcomesArr[0] ?? 'YES') : (outcomesArr[0] ?? 'YES');
+
+      await this.logs.info(StrategyType.COPY_TRADE, `BUY ${outcome} | ${market.question} | ${shares.toFixed(2)} shares @ $${price.toFixed(4)} | $${size.toFixed(2)}`);
 
       if (this.isDryRun) {
         const currentBalance = await this.settings.getNumber('COPY_TRADE_SIM_BALANCE', 1000);

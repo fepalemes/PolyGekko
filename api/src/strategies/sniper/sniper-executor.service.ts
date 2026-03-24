@@ -21,6 +21,7 @@ interface SniperAssetState {
 export class SniperExecutorService {
   private config: any = {};
   private isDryRun = true;
+  private paused = false;
   private timer: NodeJS.Timeout | null = null;
   private assetStates = new Map<string, SniperAssetState>();
 
@@ -50,9 +51,15 @@ export class SniperExecutorService {
 
   stop() {
     if (this.timer) { clearInterval(this.timer); this.timer = null; }
+    this.paused = false;
+  }
+
+  setPaused(value: boolean) {
+    this.paused = value;
   }
 
   private async round() {
+    if (this.paused) return;
     for (const asset of this.config.assets) {
       const state = this.assetStates.get(asset)!;
 

@@ -10,6 +10,7 @@ import { getPositions } from '@/lib/api';
 import { formatUSD, formatNumber, truncate, strategyLabel } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useLang } from '@/lib/i18n';
+import { useSimMode } from '@/hooks/use-sim-mode';
 import type { PositionStatus } from '@/lib/types';
 
 const statusColors = {
@@ -31,12 +32,15 @@ export default function PositionsPage() {
   const [filterStrategy, setFilterStrategy] = useState('ALL');
   const { t } = useLang();
   const p = t.positions;
+  const isDryRun = useSimMode();
+  const dryRunStr = String(isDryRun);
 
   const { data: positions = [], isLoading } = useQuery({
-    queryKey: ['positions', filterStatus, filterStrategy],
+    queryKey: ['positions', filterStatus, filterStrategy, dryRunStr],
     queryFn: () => getPositions({
       ...(filterStatus !== 'ALL' && { status: filterStatus }),
       ...(filterStrategy !== 'ALL' && { strategyType: filterStrategy }),
+      isDryRun: dryRunStr,
     }),
     refetchInterval: 10000,
   });

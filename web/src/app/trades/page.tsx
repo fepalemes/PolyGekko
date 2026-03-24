@@ -9,6 +9,7 @@ import { getTrades } from '@/lib/api';
 import { formatUSD, truncate, strategyLabel } from '@/lib/utils';
 import { formatDistanceToNow } from 'date-fns';
 import { useLang } from '@/lib/i18n';
+import { useSimMode } from '@/hooks/use-sim-mode';
 
 const sideColors    = { BUY: 'success', SELL: 'destructive' } as const;
 const statusColors  = { FILLED: 'success', PENDING: 'warning', CANCELLED: 'secondary', FAILED: 'destructive' } as const;
@@ -24,13 +25,16 @@ export default function TradesPage() {
   const [filterSide, setFilterSide] = useState('ALL');
   const { t } = useLang();
   const tr = t.trades;
+  const isDryRun = useSimMode();
+  const dryRunStr = String(isDryRun);
 
   const { data: trades = [], isLoading } = useQuery({
-    queryKey: ['trades', filterStrategy, filterSide],
+    queryKey: ['trades', filterStrategy, filterSide, dryRunStr],
     queryFn: () => getTrades({
       ...(filterStrategy !== 'ALL' && { strategyType: filterStrategy }),
       ...(filterSide !== 'ALL' && { side: filterSide }),
       limit: '200',
+      isDryRun: dryRunStr,
     }),
     refetchInterval: 15000,
   });

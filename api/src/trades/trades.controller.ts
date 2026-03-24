@@ -13,8 +13,9 @@ export class TradesController {
     @Query('conditionId') conditionId?: string,
     @Query('strategyType') strategyType?: string,
     @Query('side') side?: string,
+    @Query('isDryRun') isDryRun?: string,
     @Query('limit') limit?: string,
   ) {
-    return this.tradesService.findAll({ conditionId, strategyType, side, limit: limit ? +limit : 100 });
+    return this.tradesService.findAll({ conditionId, strategyType, side, isDryRun, limit: limit ? +limit : 100 });
   }
 }

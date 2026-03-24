@@ -9,11 +9,14 @@ import { SimStatsPanel } from '@/components/dashboard/sim-stats-panel';
 import { BalancePanel } from '@/components/dashboard/balance-panel';
 import { WinLossChart } from '@/components/dashboard/win-loss-chart';
 import { AllocationChart } from '@/components/dashboard/allocation-chart';
-import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance, getSettingsByCategory } from '@/lib/api';
+import { getStrategiesStatus, getSimStats, getPositions, getTrades, getPerformance } from '@/lib/api';
 import { useSocketEvents } from '@/hooks/use-socket-events';
+import { useSimMode } from '@/hooks/use-sim-mode';
 
 export default function DashboardPage() {
   useSocketEvents();
+  const isDryRun = useSimMode();
+  const dryRunStr = String(isDryRun);
 
   const { data: statuses = [] } = useQuery({
     queryKey: ['strategies'],
@@ -31,23 +34,15 @@ export default function DashboardPage() {
     refetchInterval: 30000,
   });
   const { data: positions = [] } = useQuery({
-    queryKey: ['positions'],
-    queryFn: () => getPositions(),
+    queryKey: ['positions', dryRunStr],
+    queryFn: () => getPositions({ isDryRun: dryRunStr }),
     refetchInterval: 10000,
   });
   const { data: trades = [] } = useQuery({
-    queryKey: ['trades'],
-    queryFn: () => getTrades({ limit: '50' }),
+    queryKey: ['trades', dryRunStr],
+    queryFn: () => getTrades({ limit: '50', isDryRun: dryRunStr }),
     refetchInterval: 15000,
   });
-  const { data: settings = [] } = useQuery({
-    queryKey: ['settings', 'system'],
-    queryFn: () => getSettingsByCategory('system'),
-    refetchInterval: 30000,
-  });
-
-  const simModeSetting = settings.find(s => s.key === 'GLOBAL_SIMULATION_MODE');
-  const isDryRun = simModeSetting ? simModeSetting.value === 'true' : true;
 
   return (
     <MainLayout title="Dashboard">

@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { StrategyType, TradeSide, TradeStatus, PositionStatus, SimOutcome } from '@prisma/client';
 import { ClobService } from '../../polymarket/clob.service';
-import { CtfService } from '../../polymarket/ctf.service';
 import { LogsService } from '../../logs/logs.service';
 import { TradesService } from '../../trades/trades.service';
 import { PositionsService } from '../../positions/positions.service';
@@ -47,7 +46,6 @@ export class MmExecutorService {
 
   constructor(
     private clob: ClobService,
-    private ctf: CtfService,
     private logs: LogsService,
     private trades: TradesService,
     private positionsService: PositionsService,
@@ -145,7 +143,9 @@ export class MmExecutorService {
     );
 
     // Enter immediately — order book is open before the resolution window starts
-    setTimeout(() => this.enter(conditionId), 0);
+    setTimeout(() => this.enter(conditionId).catch(err =>
+      this.logs.error(StrategyType.MARKET_MAKER, `[MM] enter() failed: ${err.message}`)
+    ), 0);
 
     // Schedule cut-loss check before market close
     const cutLossAt = endTime.getTime() - this.config.cutLossTime * 1000;
@@ -156,6 +156,9 @@ export class MmExecutorService {
   private async enter(conditionId: string) {
     const pos = this.positions.get(conditionId);
     if (!pos) return;
+
+    this.logger.log(`[MM] enter() called for "${pos.question}"`);
+    await this.logs.info(StrategyType.MARKET_MAKER, `[MM] Attempting entry: "${pos.question}"`);
 
     const now = Date.now();
     const timeLeft = pos.endTime.getTime() - now;
@@ -185,27 +188,55 @@ export class MmExecutorService {
     const tradeSize = this.config.dynamicSizingEnabled
       ? Number((Math.random() * (this.config.maxAllocation - this.config.minAllocation) + this.config.minAllocation).toFixed(2))
       : this.config.tradeSize;
-    
+
     (pos as any)._tradeSize = tradeSize;
 
-    // --- Binance Trend Sizing ---
+    // ── Fetch live midpoints ──────────────────────────────────────────────────
+    const [yesMid, noMid] = await Promise.all([
+      this.clob.getMidpoint(pos.yesTokenId).catch(() => 0),
+      this.clob.getMidpoint(pos.noTokenId).catch(() => 0),
+    ]);
+    await this.logs.info(StrategyType.MARKET_MAKER, `[MM] Midpoints: YES=${yesMid.toFixed(3)} NO=${noMid.toFixed(3)} combined=${(yesMid+noMid).toFixed(3)} maxCombined=${this.config.entryMaxCombined ?? 1.02}`);
+
+    // ── Entry filter: combined price guard ───────────────────────────────────
+    const combined = yesMid + noMid;
+    const maxCombined = this.config.entryMaxCombined ?? 1.02;
+    if (combined <= 0 || combined > maxCombined) {
+      const reason = combined <= 0 ? 'no liquidity' : `combined=${combined.toFixed(3)} > max=${maxCombined}`;
+      await this.logs.warn(StrategyType.MARKET_MAKER,
+        `[ENTRY FILTER] Skipping "${pos.question}" — ${reason}. Combined mid above threshold, buying above fair value.`);
+      this.cleanup(conditionId);
+      return;
+    }
+
+    // ── Entry filter: individual token price bounds ───────────────────────────
+    const minTok = this.config.entryMinTokenPrice ?? 0.20;
+    const maxTok = this.config.entryMaxTokenPrice ?? 0.80;
+    if (yesMid < minTok || yesMid > maxTok || noMid < minTok || noMid > maxTok) {
+      await this.logs.warn(StrategyType.MARKET_MAKER,
+        `[ENTRY FILTER] Skipping "${pos.question}" — market too one-sided. YES=$${yesMid.toFixed(3)} NO=$${noMid.toFixed(3)} (allowed ${minTok}-${maxTok})`);
+      this.cleanup(conditionId);
+      return;
+    }
+
+    // ── Binance short-term momentum bias ──────────────────────────────────────
     let yesWeight = 0.5;
     let noWeight = 0.5;
     if (this.config.binanceTrendEnabled && pos.asset) {
-      const trend = await this.binance.getTrendPercent(pos.asset);
-      const weights = this.binance.calculateWeight(trend, this.config.maxBiasPercent || 80);
+      const trend = await this.binance.getShortTermMomentum(
+        pos.asset,
+        this.config.binanceKlineInterval || '1m',
+        this.config.binanceKlinePeriods || 3,
+      );
+      const weights = this.binance.calculateWeight(trend, this.config.maxBiasPercent || 70, 2);
       yesWeight = weights.yesWeight;
       noWeight = weights.noWeight;
-      await this.logs.info(StrategyType.MARKET_MAKER, `[BINANCE] Trend for ${pos.asset} is ${trend.toFixed(2)}%. Ratio -> YES: ${Math.round(yesWeight*100)}% / NO: ${Math.round(noWeight*100)}%`);
+      await this.logs.info(StrategyType.MARKET_MAKER,
+        `[BINANCE] Short-term momentum for ${pos.asset.toUpperCase()}: ${trend >= 0 ? '+' : ''}${trend.toFixed(3)}% → YES: ${Math.round(yesWeight * 100)}% / NO: ${Math.round(noWeight * 100)}%`);
     }
 
     const yesCapital = tradeSize * yesWeight;
     const noCapital = tradeSize * noWeight;
-
-    const [yesMid, noMid] = await Promise.all([
-      this.clob.getMidpoint(pos.yesTokenId).catch(() => 0.5),
-      this.clob.getMidpoint(pos.noTokenId).catch(() => 0.5),
-    ]);
 
     const yesBuyPrice = Math.min(0.99, Math.max(0.01, yesMid));
     const noBuyPrice = Math.min(0.99, Math.max(0.01, noMid));
@@ -238,8 +269,8 @@ export class MmExecutorService {
       return;
     }
     if (liveBalance - tradeSize < minLiveBal) {
-      this.logger.warn(`[LIVE] Order trades below min margin $${minLiveBal} (balance: $${liveBalance.toFixed(2)})`);
-      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Order would leave balance below min margin $${minLiveBal} (balance: $${liveBalance.toFixed(2)}) — skipping`);
+      this.logger.warn(`[LIVE] Insufficient margin: balance=$${liveBalance.toFixed(2)} tradeSize=$${tradeSize.toFixed(2)} would leave $${(liveBalance-tradeSize).toFixed(2)} < minMargin=$${minLiveBal}`);
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[LIVE] Insufficient margin: $${liveBalance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(liveBalance-tradeSize).toFixed(2)} < required $${minLiveBal}`);
       this.cleanup(conditionId);
       return;
     }
@@ -310,7 +341,8 @@ export class MmExecutorService {
     }
     
     if (balance - tradeSize < minBal) {
-      this.logger.warn(`[SIM] Order leaves balance below min margin $${minBal}`);
+      this.logger.warn(`[SIM] Insufficient margin: balance=$${balance.toFixed(2)} tradeSize=$${tradeSize.toFixed(2)} would leave $${(balance - tradeSize).toFixed(2)} < minMargin=$${minBal}`);
+      await this.logs.warn(StrategyType.MARKET_MAKER, `[SIM] Insufficient margin: $${balance.toFixed(2)} − $${tradeSize.toFixed(2)} = $${(balance-tradeSize).toFixed(2)} < required $${minBal} — reset sim data to restore balance`);
       this.cleanup(conditionId);
       return;
     }
@@ -380,30 +412,50 @@ export class MmExecutorService {
 
       try {
         const [yesMid, noMid] = await Promise.all([
-          this.clob.getMidpoint(pos.yesTokenId),
-          this.clob.getMidpoint(pos.noTokenId),
+          this.clob.getMidpoint(pos.yesTokenId).catch(() => 0),
+          this.clob.getMidpoint(pos.noTokenId).catch(() => 0),
         ]);
+        if (yesMid <= 0 || noMid <= 0) return;
 
+        // ── Mark fills when target price reached ─────────────────────────────
         if (!pos.yesSellFilled && yesMid >= pos.targetSellYes) {
           pos.yesSellFilled = true;
-          const pnl = (pos.targetSellYes * pos.yesSharesOwned) - (tradeSize / 2); // approximate PnL math
           this.logger.log(`[SIM] YES SELL filled at $${yesMid.toFixed(3)}`);
           await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] YES SELL filled at $${yesMid.toFixed(3)} (target $${pos.targetSellYes.toFixed(3)})`);
         }
-
         if (!pos.noSellFilled && noMid >= pos.targetSellNo) {
           pos.noSellFilled = true;
           this.logger.log(`[SIM] NO SELL filled at $${noMid.toFixed(3)}`);
           await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] NO SELL filled at $${noMid.toFixed(3)} (target $${pos.targetSellNo.toFixed(3)})`);
         }
 
+        // ── Both sides filled → close with profit ────────────────────────────
         if (pos.yesSellFilled && pos.noSellFilled) {
           clearInterval(interval);
           const revenue = (pos.targetSellYes * pos.yesSharesOwned) + (pos.targetSellNo * pos.noSharesOwned);
           const totalPnl = revenue - tradeSize;
-          this.logger.log(`[SIM] Both SELLs filled — profit! est. P&L: +$${totalPnl.toFixed(2)}`);
+          this.logger.log(`[SIM] Both SELLs filled! est. P&L: +$${totalPnl.toFixed(2)}`);
           await this.logs.info(StrategyType.MARKET_MAKER, `[SIM] Both SELLs filled! est. P&L: +$${totalPnl.toFixed(2)}`);
           await this.closeSimPosition(pos, totalPnl, true, tradeSize);
+          return;
+        }
+
+        // ── Early exit: stop-loss floor ──────────────────────────────────────
+        if (this.config.earlyExitEnabled !== false) {
+          const floorPct = this.config.earlyExitLossPct ?? 40;
+          const yesValue = pos.yesSellFilled ? (pos.yesSharesOwned * pos.targetSellYes) : (pos.yesSharesOwned * yesMid);
+          const noValue  = pos.noSellFilled  ? (pos.noSharesOwned  * pos.targetSellNo)  : (pos.noSharesOwned  * noMid);
+          const currentValue = yesValue + noValue;
+          const floor = tradeSize * (1 - floorPct / 100);
+          if (currentValue < floor) {
+            clearInterval(interval);
+            const pnl = currentValue - tradeSize;
+            this.logger.warn(`[SIM] Early exit — value $${currentValue.toFixed(2)} < floor $${floor.toFixed(2)} | P&L: $${pnl.toFixed(2)}`);
+            await this.logs.warn(StrategyType.MARKET_MAKER,
+              `[SIM] Early exit triggered — current value $${currentValue.toFixed(2)} dropped below ${floorPct}% stop floor ($${floor.toFixed(2)}) | P&L: $${pnl.toFixed(2)}`);
+            (pos as any)._isCutLoss = true;
+            await this.closeSimPosition(pos, pnl, false, tradeSize);
+          }
         }
       } catch {}
     }, 5000);
@@ -435,7 +487,7 @@ export class MmExecutorService {
           pos.noBuyFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO BUY order filled. Listing SELL...`);
           const sell = await this.clob.placeGTCOrder(pos.noTokenId, 'SELL', pos.targetSellNo, pos.noSharesOwned);
-          if (sell?.id) pos.yesSellOrderId = sell.id; // Bug fix: noSellOrderId
+          if (sell?.id) pos.noSellOrderId = sell.id;
         }
       }
 
@@ -452,6 +504,27 @@ export class MmExecutorService {
         if (order?.status === 'MATCHED') {
           pos.noSellFilled = true;
           await this.logs.info(StrategyType.MARKET_MAKER, `[LIVE] NO SELL order filled`);
+        }
+      }
+
+      // ── Early exit: stop-loss floor (live) ─────────────────────────────────
+      if (this.config.earlyExitEnabled !== false && (pos.yesBuyFilled || pos.noBuyFilled)) {
+        const floorPct = this.config.earlyExitLossPct ?? 40;
+        const yesMid = await this.clob.getMidpoint(pos.yesTokenId).catch(() => 0);
+        const noMid  = await this.clob.getMidpoint(pos.noTokenId).catch(() => 0);
+        if (yesMid > 0 && noMid > 0) {
+          const tradeSize = (pos as any)._tradeSize || this.config.tradeSize;
+          const yesValue = pos.yesSellFilled ? (pos.yesSharesOwned * pos.targetSellYes) : (pos.yesSharesOwned * yesMid);
+          const noValue  = pos.noSellFilled  ? (pos.noSharesOwned  * pos.targetSellNo)  : (pos.noSharesOwned  * noMid);
+          const currentValue = yesValue + noValue;
+          const floor = tradeSize * (1 - floorPct / 100);
+          if (currentValue < floor) {
+            clearInterval(interval);
+            await this.logs.warn(StrategyType.MARKET_MAKER,
+              `[LIVE] Early exit triggered — value $${currentValue.toFixed(2)} below floor $${floor.toFixed(2)}`);
+            await this.cutLossLive(pos);
+            this.cleanup(pos.conditionId);
+          }
         }
       }
     }, 5000);

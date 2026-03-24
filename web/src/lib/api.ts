@@ -19,7 +19,7 @@ export const getPositions = (filters?: { status?: string; strategyType?: string;
 export const getPosition = (id: number) => apiFetch<Position>(`/positions/${id}`);
 
 // Trades
-export const getTrades = (filters?: { conditionId?: string; strategyType?: string; limit?: string }) => {
+export const getTrades = (filters?: { conditionId?: string; strategyType?: string; side?: string; isDryRun?: string; limit?: string }) => {
   const params = new URLSearchParams(filters as Record<string, string>);
   return apiFetch<Trade[]>(`/trades?${params}`);
 };
@@ -49,6 +49,10 @@ export const startStrategy = (type: string) =>
   apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/start`, { method: 'POST' });
 export const stopStrategy = (type: string) =>
   apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/stop`, { method: 'POST' });
+export const pauseStrategy = (type: string) =>
+  apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/pause`, { method: 'POST' });
+export const resumeStrategy = (type: string) =>
+  apiFetch(`/strategies/${type.toLowerCase().replace('_', '-')}/resume`, { method: 'POST' });
 export const getSimStats = () => apiFetch<SimStats[]>('/strategies/sim-stats');
 export const getPerformance = (strategy?: string, limit?: number) => {
   const params = new URLSearchParams();
@@ -69,6 +73,13 @@ export const updateSimBalance = (value: string) =>
     { key: 'COPY_TRADE_SIM_BALANCE', value },
     { key: 'MM_SIM_BALANCE', value },
   ]) });
+
+// Trading Mode
+export type TradingMode = 'high' | 'intermediate' | 'low' | 'custom';
+export const getTradingMode = () =>
+  apiFetch<{ mode: TradingMode; presets: Record<string, Record<string, string>> }>('/strategies/trading-mode');
+export const setTradingMode = (mode: TradingMode) =>
+  apiFetch('/strategies/trading-mode', { method: 'POST', body: JSON.stringify({ mode }) });
 
 // Notifications
 export const testTelegram = () =>

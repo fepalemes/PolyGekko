@@ -6,11 +6,12 @@ import { StrategyType, TradeSide, TradeStatus } from '@prisma/client';
 export class TradesService {
   constructor(private prisma: PrismaService) {}
 
-  async findAll(filters?: { conditionId?: string; strategyType?: string; side?: string; limit?: number }) {
+  async findAll(filters?: { conditionId?: string; strategyType?: string; side?: string; isDryRun?: string; limit?: number }) {
     const where: any = {};
     if (filters?.conditionId) where.conditionId = filters.conditionId;
     if (filters?.strategyType) where.strategyType = filters.strategyType as StrategyType;
     if (filters?.side) where.side = filters.side as TradeSide;
+    if (filters?.isDryRun !== undefined) where.isDryRun = filters.isDryRun === 'true';
 
     return this.prisma.trade.findMany({
       where,

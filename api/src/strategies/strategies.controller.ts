@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Delete, Param, Query, ParseBoolPipe, DefaultValuePipe } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Param, Query, Body, ParseBoolPipe, DefaultValuePipe } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiQuery } from '@nestjs/swagger';
 import { StrategiesService } from './strategies.service';
+import { TradingMode } from '../settings/settings.service';
 
 @ApiTags('strategies')
 @Controller('strategies')
@@ -42,6 +43,18 @@ export class StrategiesController {
     return this.strategiesService.clearSimData();
   }
 
+  @Get('trading-mode')
+  @ApiOperation({ summary: 'Get active trading mode and all presets' })
+  getTradingMode() {
+    return this.strategiesService.getTradingMode();
+  }
+
+  @Post('trading-mode')
+  @ApiOperation({ summary: 'Apply a trading mode preset' })
+  applyTradingMode(@Body('mode') mode: TradingMode) {
+    return this.strategiesService.applyTradingMode(mode);
+  }
+
   @Get('balance')
   @ApiOperation({ summary: 'Get current balance (simulated or real)' })
   @ApiQuery({ name: 'isDryRun', required: false, type: Boolean })
@@ -57,6 +70,14 @@ export class StrategiesController {
   @ApiOperation({ summary: 'Stop copy trade strategy' })
   stopCopyTrade() { return this.strategiesService.stop('COPY_TRADE'); }
 
+  @Post('copy-trade/pause')
+  @ApiOperation({ summary: 'Pause copy trade strategy (no new entries)' })
+  pauseCopyTrade() { return this.strategiesService.pause('COPY_TRADE'); }
+
+  @Post('copy-trade/resume')
+  @ApiOperation({ summary: 'Resume copy trade strategy' })
+  resumeCopyTrade() { return this.strategiesService.resume('COPY_TRADE'); }
+
   @Get('copy-trade/status')
   @ApiOperation({ summary: 'Get copy trade status' })
   getCopyTradeStatus() { return this.strategiesService.getStatus('COPY_TRADE'); }
@@ -69,6 +90,14 @@ export class StrategiesController {
   @ApiOperation({ summary: 'Stop market maker strategy' })
   stopMarketMaker() { return this.strategiesService.stop('MARKET_MAKER'); }
 
+  @Post('market-maker/pause')
+  @ApiOperation({ summary: 'Pause market maker strategy (no new entries)' })
+  pauseMarketMaker() { return this.strategiesService.pause('MARKET_MAKER'); }
+
+  @Post('market-maker/resume')
+  @ApiOperation({ summary: 'Resume market maker strategy' })
+  resumeMarketMaker() { return this.strategiesService.resume('MARKET_MAKER'); }
+
   @Get('market-maker/status')
   @ApiOperation({ summary: 'Get market maker status' })
   getMarketMakerStatus() { return this.strategiesService.getStatus('MARKET_MAKER'); }
@@ -80,6 +109,14 @@ export class StrategiesController {
   @Post('sniper/stop')
   @ApiOperation({ summary: 'Stop sniper strategy' })
   stopSniper() { return this.strategiesService.stop('SNIPER'); }
+
+  @Post('sniper/pause')
+  @ApiOperation({ summary: 'Pause sniper strategy (no new entries)' })
+  pauseSniper() { return this.strategiesService.pause('SNIPER'); }
+
+  @Post('sniper/resume')
+  @ApiOperation({ summary: 'Resume sniper strategy' })
+  resumeSniper() { return this.strategiesService.resume('SNIPER'); }
 
   @Get('sniper/status')
   @ApiOperation({ summary: 'Get sniper status' })

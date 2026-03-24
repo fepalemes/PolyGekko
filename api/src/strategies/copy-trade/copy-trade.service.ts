@@ -10,6 +10,7 @@ import { RedeemerService } from './redeemer.service';
 @Injectable()
 export class CopyTradeService {
   private running = false;
+  private paused = false;
   private isDryRun = true;
   private startedAt: Date | null = null;
 
@@ -26,6 +27,7 @@ export class CopyTradeService {
     return {
       type: 'COPY_TRADE',
       running: this.running,
+      paused: this.paused,
       isDryRun: this.isDryRun,
       startedAt: this.startedAt?.toISOString() || null,
     };
@@ -43,6 +45,7 @@ export class CopyTradeService {
     }
 
     this.running = true;
+    this.paused = false;
     this.startedAt = new Date();
 
     // Persist running state so it survives restarts
@@ -52,7 +55,10 @@ export class CopyTradeService {
     this.events.emitStrategyStatus(this.getStatus());
 
     this.executor.setConfig(config, this.isDryRun);
-    this.watcher.start(config.traderAddress, (trade) => this.executor.onTradeDetected(trade));
+    this.watcher.start(config.traderAddress, (trade) => {
+      if (this.paused) return;
+      this.executor.onTradeDetected(trade);
+    });
     this.redeemer.start(config.redeemInterval, this.isDryRun, config);
 
     return { message: 'Started', status: this.getStatus() };
@@ -61,6 +67,7 @@ export class CopyTradeService {
   async stop() {
     if (!this.running) return { message: 'Not running' };
     this.running = false;
+    this.paused = false;
     this.startedAt = null;
 
     await this.settings.set('COPY_TRADE_RUNNING', 'false');
@@ -70,5 +77,23 @@ export class CopyTradeService {
     await this.logs.info(StrategyType.COPY_TRADE, 'Strategy stopped');
     this.events.emitStrategyStatus(this.getStatus());
     return { message: 'Stopped', status: this.getStatus() };
+  }
+
+  async pause() {
+    if (!this.running) return { message: 'Not running' };
+    if (this.paused) return { message: 'Already paused' };
+    this.paused = true;
+    await this.logs.info(StrategyType.COPY_TRADE, 'Strategy paused — no new entries will be made');
+    this.events.emitStrategyStatus(this.getStatus());
+    return { message: 'Paused', status: this.getStatus() };
+  }
+
+  async resume() {
+    if (!this.running) return { message: 'Not running' };
+    if (!this.paused) return { message: 'Not paused' };
+    this.paused = false;
+    await this.logs.info(StrategyType.COPY_TRADE, 'Strategy resumed');
+    this.events.emitStrategyStatus(this.getStatus());
+    return { message: 'Resumed', status: this.getStatus() };
   }
 }

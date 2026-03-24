@@ -8,6 +8,7 @@ import { SniperExecutorService } from './sniper-executor.service';
 @Injectable()
 export class SniperService {
   private running = false;
+  private paused = false;
   private isDryRun = true;
   private startedAt: Date | null = null;
 
@@ -22,6 +23,7 @@ export class SniperService {
     return {
       type: 'SNIPER',
       running: this.running,
+      paused: this.paused,
       isDryRun: this.isDryRun,
       startedAt: this.startedAt?.toISOString() || null,
     };
@@ -32,6 +34,7 @@ export class SniperService {
     const config = await this.settings.getSniperConfig();
     this.isDryRun = await this.settings.isGlobalSimulationMode();
     this.running = true;
+    this.paused = false;
     this.startedAt = new Date();
 
     await this.settings.set('SNIPER_RUNNING', 'true');
@@ -45,6 +48,7 @@ export class SniperService {
   async stop() {
     if (!this.running) return { message: 'Not running' };
     this.running = false;
+    this.paused = false;
     this.startedAt = null;
 
     await this.settings.set('SNIPER_RUNNING', 'false');
@@ -53,5 +57,25 @@ export class SniperService {
     await this.logs.info(StrategyType.SNIPER, 'Strategy stopped');
     this.events.emitStrategyStatus(this.getStatus());
     return { message: 'Stopped', status: this.getStatus() };
+  }
+
+  async pause() {
+    if (!this.running) return { message: 'Not running' };
+    if (this.paused) return { message: 'Already paused' };
+    this.paused = true;
+    this.executor.setPaused(true);
+    await this.logs.info(StrategyType.SNIPER, 'Strategy paused — no new entries will be made');
+    this.events.emitStrategyStatus(this.getStatus());
+    return { message: 'Paused', status: this.getStatus() };
+  }
+
+  async resume() {
+    if (!this.running) return { message: 'Not running' };
+    if (!this.paused) return { message: 'Not paused' };
+    this.paused = false;
+    this.executor.setPaused(false);
+    await this.logs.info(StrategyType.SNIPER, 'Strategy resumed');
+    this.events.emitStrategyStatus(this.getStatus());
+    return { message: 'Resumed', status: this.getStatus() };
   }
 }

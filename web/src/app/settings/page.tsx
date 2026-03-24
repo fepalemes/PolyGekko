@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { HelpTooltip } from '@/components/ui/help-tooltip';
 import { TelegramForm } from '@/components/settings/telegram-form';
+import { TradingModeForm } from '@/components/settings/trading-mode-form';
 import { getSettingsByCategory, bulkUpdateSettings } from '@/lib/api';
 import { toast } from '@/components/ui/use-toast';
 import { useLang } from '@/lib/i18n';
@@ -82,14 +83,16 @@ export default function SettingsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="copy_trade">
+            <Tabs defaultValue="trading_mode">
               <TabsList className="mb-6">
+                <TabsTrigger value="trading_mode">{s.tradingMode}</TabsTrigger>
                 <TabsTrigger value="copy_trade">{s.copyTrade}</TabsTrigger>
                 <TabsTrigger value="market_maker">{s.marketMaker}</TabsTrigger>
                 <TabsTrigger value="sniper">{s.sniper}</TabsTrigger>
                 <TabsTrigger value="telegram">{s.telegram}</TabsTrigger>
                 <TabsTrigger value="system">{s.system}</TabsTrigger>
               </TabsList>
+              <TabsContent value="trading_mode"><TradingModeForm /></TabsContent>
               <TabsContent value="copy_trade"><CategoryTab category="copy_trade" /></TabsContent>
               <TabsContent value="market_maker"><CategoryTab category="market_maker" /></TabsContent>
               <TabsContent value="sniper"><CategoryTab category="sniper" /></TabsContent>

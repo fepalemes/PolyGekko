@@ -10,7 +10,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
+      <head>
+        {/* Apply theme before first paint to avoid flash */}
+        <script dangerouslySetInnerHTML={{ __html: `(function(){var t=localStorage.getItem('polygekko-theme')||'dark';document.documentElement.classList.add(t);})();` }} />
+      </head>
       <body>
         <Providers>
           {children}

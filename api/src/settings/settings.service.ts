@@ -1,6 +1,95 @@
 import { Injectable, OnModuleInit } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
+export type TradingMode = 'high' | 'intermediate' | 'low' | 'custom';
+
+// Settings applied when a preset mode is selected.
+// DRY_RUN flags are intentionally excluded — those stay as the user set them.
+export const TRADING_MODE_PRESETS: Record<Exclude<TradingMode, 'custom'>, Record<string, string>> = {
+  high: {
+    // Copy Trade
+    COPY_TRADE_SIZE_MODE: 'fixed',
+    COPY_TRADE_FIXED_AMOUNT: '50',
+    COPY_TRADE_MAX_BALANCE_USAGE_PERCENT: '80',
+    COPY_TRADE_MIN_LIVE_BALANCE: '10',
+    COPY_TRADE_MIN_ENTRY_AMOUNT: '5',
+    COPY_TRADE_MIN_MARKET_TIME_LEFT: '60',
+    COPY_TRADE_STOP_LOSS_PERCENT: '0',
+    COPY_TRADE_AUTO_SELL_ENABLED: 'true',
+    COPY_TRADE_AUTO_SELL_PROFIT_PERCENT: '30',
+    COPY_TRADE_GTC_FALLBACK_TIMEOUT: '45',
+    // Market Maker
+    MM_TRADE_SIZE: '50',
+    MM_SELL_PRICE: '0.65',
+    MM_CUT_LOSS_TIME: '30',
+    MM_ENTRY_MAX_COMBINED: '1.05',
+    MM_ENTRY_MIN_TOKEN_PRICE: '0.10',
+    MM_ENTRY_MAX_TOKEN_PRICE: '0.90',
+    MM_EARLY_EXIT_ENABLED: 'true',
+    MM_EARLY_EXIT_LOSS_PCT: '60',
+    // Sniper
+    SNIPER_MAX_SHARES: '50',
+    SNIPER_TIER1_PRICE: '0.04',
+    SNIPER_TIER2_PRICE: '0.03',
+    SNIPER_TIER3_PRICE: '0.02',
+    // Global
+    GLOBAL_WALLET_MARGIN: '10',
+    GLOBAL_MAX_ENTRIES_PER_MINUTE: '10',
+  },
+  intermediate: {
+    COPY_TRADE_SIZE_MODE: 'fixed',
+    COPY_TRADE_FIXED_AMOUNT: '20',
+    COPY_TRADE_MAX_BALANCE_USAGE_PERCENT: '50',
+    COPY_TRADE_MIN_LIVE_BALANCE: '20',
+    COPY_TRADE_MIN_ENTRY_AMOUNT: '2',
+    COPY_TRADE_MIN_MARKET_TIME_LEFT: '120',
+    COPY_TRADE_STOP_LOSS_PERCENT: '30',
+    COPY_TRADE_AUTO_SELL_ENABLED: 'true',
+    COPY_TRADE_AUTO_SELL_PROFIT_PERCENT: '50',
+    COPY_TRADE_GTC_FALLBACK_TIMEOUT: '60',
+    MM_TRADE_SIZE: '20',
+    MM_SELL_PRICE: '0.60',
+    MM_CUT_LOSS_TIME: '60',
+    MM_ENTRY_MAX_COMBINED: '1.02',
+    MM_ENTRY_MIN_TOKEN_PRICE: '0.20',
+    MM_ENTRY_MAX_TOKEN_PRICE: '0.80',
+    MM_EARLY_EXIT_ENABLED: 'true',
+    MM_EARLY_EXIT_LOSS_PCT: '40',
+    SNIPER_MAX_SHARES: '25',
+    SNIPER_TIER1_PRICE: '0.03',
+    SNIPER_TIER2_PRICE: '0.02',
+    SNIPER_TIER3_PRICE: '0.01',
+    GLOBAL_WALLET_MARGIN: '20',
+    GLOBAL_MAX_ENTRIES_PER_MINUTE: '5',
+  },
+  low: {
+    COPY_TRADE_SIZE_MODE: 'fixed',
+    COPY_TRADE_FIXED_AMOUNT: '5',
+    COPY_TRADE_MAX_BALANCE_USAGE_PERCENT: '20',
+    COPY_TRADE_MIN_LIVE_BALANCE: '50',
+    COPY_TRADE_MIN_ENTRY_AMOUNT: '1',
+    COPY_TRADE_MIN_MARKET_TIME_LEFT: '300',
+    COPY_TRADE_STOP_LOSS_PERCENT: '50',
+    COPY_TRADE_AUTO_SELL_ENABLED: 'true',
+    COPY_TRADE_AUTO_SELL_PROFIT_PERCENT: '80',
+    COPY_TRADE_GTC_FALLBACK_TIMEOUT: '90',
+    MM_TRADE_SIZE: '5',
+    MM_SELL_PRICE: '0.55',
+    MM_CUT_LOSS_TIME: '90',
+    MM_ENTRY_MAX_COMBINED: '1.00',
+    MM_ENTRY_MIN_TOKEN_PRICE: '0.30',
+    MM_ENTRY_MAX_TOKEN_PRICE: '0.70',
+    MM_EARLY_EXIT_ENABLED: 'true',
+    MM_EARLY_EXIT_LOSS_PCT: '25',
+    SNIPER_MAX_SHARES: '10',
+    SNIPER_TIER1_PRICE: '0.03',
+    SNIPER_TIER2_PRICE: '0.02',
+    SNIPER_TIER3_PRICE: '0.01',
+    GLOBAL_WALLET_MARGIN: '50',
+    GLOBAL_MAX_ENTRIES_PER_MINUTE: '2',
+  },
+};
+
 const DEFAULT_SETTINGS = [
   // ── Copy Trade ──────────────────────────────────────────────────────────────
   { key: 'COPY_TRADE_RUNNING', value: 'false', category: 'copy_trade', description: 'Whether the strategy is running (auto-restored on restart)' },
@@ -44,8 +133,17 @@ const DEFAULT_SETTINGS = [
   { key: 'MM_MIN_ALLOCATION', value: '5', category: 'market_maker', description: 'Minimum USDC to allocate dynamically' },
   { key: 'MM_MAX_ALLOCATION', value: '50', category: 'market_maker', description: 'Maximum USDC to allocate dynamically' },
   { key: 'MM_SPREAD_PROFIT_TARGET', value: '0.01', category: 'market_maker', description: 'Take-profit margin above entry price (e.g. 0.01 = 1 cent)' },
-  { key: 'MM_BINANCE_TREND_ENABLED', value: 'false', category: 'market_maker', description: 'Use Binance momentum to skew YES/NO capital allocation' },
-  { key: 'MM_MAX_BIAS_PERCENT', value: '80', category: 'market_maker', description: 'Maximum bias percent (e.g. 80 means up to 80% capital on trending side)' },
+  { key: 'MM_BINANCE_TREND_ENABLED', value: 'false', category: 'market_maker', description: 'Use Binance short-term momentum (1m klines) to skew YES/NO capital allocation' },
+  { key: 'MM_MAX_BIAS_PERCENT', value: '70', category: 'market_maker', description: 'Maximum bias percent (e.g. 70 means up to 70% capital on trending side)' },
+  { key: 'MM_BINANCE_KLINE_INTERVAL', value: '1m', category: 'market_maker', description: 'Kline interval for Binance momentum. "1m" is ideal for 5m markets. Options: 1m, 3m, 5m' },
+  { key: 'MM_BINANCE_KLINE_PERIODS', value: '3', category: 'market_maker', description: 'Number of klines to compute short-term momentum (3-5 recommended)' },
+  // ── Entry filters ─────────────────────────────────────────────────────────
+  { key: 'MM_ENTRY_MAX_COMBINED', value: '1.02', category: 'market_maker', description: 'Max combined midpoint (YES+NO) to enter. Above 1.0 means you are buying above fair value on both sides. Recommended 1.00–1.05 (Polymarket 5m markets open near 1.00)' },
+  { key: 'MM_ENTRY_MIN_TOKEN_PRICE', value: '0.20', category: 'market_maker', description: 'Min midpoint for each token. Avoids very one-sided markets (e.g. YES already at 0.95)' },
+  { key: 'MM_ENTRY_MAX_TOKEN_PRICE', value: '0.80', category: 'market_maker', description: 'Max midpoint for each token. Avoids very one-sided markets (e.g. YES already at 0.95)' },
+  // ── Early exit ────────────────────────────────────────────────────────────
+  { key: 'MM_EARLY_EXIT_ENABLED', value: 'true', category: 'market_maker', description: 'Exit early if the current combined position value drops below the stop-loss floor during monitoring' },
+  { key: 'MM_EARLY_EXIT_LOSS_PCT', value: '40', category: 'market_maker', description: 'Early exit if current position value < cost × (1 - this%). E.g. 40 = exit if value drops to 60% of cost' },
 
   // ── Telegram ─────────────────────────────────────────────────────────────
   { key: 'TELEGRAM_ENABLED', value: 'false', category: 'telegram', description: 'Enable Telegram notifications' },
@@ -53,6 +151,7 @@ const DEFAULT_SETTINGS = [
   { key: 'TELEGRAM_CHAT_ID', value: '', category: 'telegram', description: 'Your chat/group ID (use @userinfobot to find it)' },
 
   // ── System ──────────────────────────────────────────────────────────────────
+  { key: 'TRADING_MODE', value: 'custom', category: 'system', description: 'Active trading mode: high | intermediate | low | custom' },
   { key: 'POLYGON_RPC_URL', value: '', category: 'system', description: 'Polygon RPC endpoint (leave empty to use env var). Recommended: Alchemy or QuickNode for reliability' },
   { key: 'GLOBAL_SIMULATION_MODE', value: 'true', category: 'system', description: 'Applies Simulation mode globally and overrides individual strategy dry-run settings' },
   { key: 'GLOBAL_WALLET_MARGIN', value: '50', category: 'system', description: 'Minimum USDC that must remain in the wallet at all times across all strategies (Live mode)' },
@@ -88,6 +187,12 @@ export class SettingsService implements OnModuleInit {
         update: { description: setting.description },
       });
     }
+    // One-time fix: MM_ENTRY_MAX_COMBINED was incorrectly defaulted to 0.97 (blocks all normal markets).
+    // Polymarket 5m markets open near combined=1.00, so 0.97 rejects every entry. Migrate to 1.02.
+    await this.prisma.setting.updateMany({
+      where: { key: 'MM_ENTRY_MAX_COMBINED', value: { in: ['0.97', '0.99', '0.95'] } },
+      data: { value: '1.02' },
+    });
   }
 
   async getAll() {
@@ -186,7 +291,14 @@ export class SettingsService implements OnModuleInit {
       maxAllocation: parseFloat(map.MM_MAX_ALLOCATION || '50'),
       spreadProfitTarget: parseFloat(map.MM_SPREAD_PROFIT_TARGET || '0.01'),
       binanceTrendEnabled: map.MM_BINANCE_TREND_ENABLED === 'true',
-      maxBiasPercent: parseFloat(map.MM_MAX_BIAS_PERCENT || '80'),
+      maxBiasPercent: parseFloat(map.MM_MAX_BIAS_PERCENT || '70'),
+      binanceKlineInterval: map.MM_BINANCE_KLINE_INTERVAL || '1m',
+      binanceKlinePeriods: parseInt(map.MM_BINANCE_KLINE_PERIODS || '3'),
+      entryMaxCombined: parseFloat(map.MM_ENTRY_MAX_COMBINED || '0.97'),
+      entryMinTokenPrice: parseFloat(map.MM_ENTRY_MIN_TOKEN_PRICE || '0.20'),
+      entryMaxTokenPrice: parseFloat(map.MM_ENTRY_MAX_TOKEN_PRICE || '0.80'),
+      earlyExitEnabled: map.MM_EARLY_EXIT_ENABLED !== 'false',
+      earlyExitLossPct: parseFloat(map.MM_EARLY_EXIT_LOSS_PCT || '40'),
     };
   }
 
@@ -204,5 +316,19 @@ export class SettingsService implements OnModuleInit {
       schedule: map.SNIPER_SCHEDULE || '',
       simBalance: parseFloat(map.SNIPER_SIM_BALANCE || '1000'),
     };
+  }
+
+  async getTradingMode(): Promise<TradingMode> {
+    const val = await this.get('TRADING_MODE');
+    return (val as TradingMode) || 'custom';
+  }
+
+  async applyTradingMode(mode: TradingMode): Promise<void> {
+    // Always persist the selected mode
+    await this.set('TRADING_MODE', mode);
+    // For 'custom', only save the flag — don't touch any other setting
+    if (mode === 'custom') return;
+    const preset = TRADING_MODE_PRESETS[mode];
+    await this.bulkSet(Object.entries(preset).map(([key, value]) => ({ key, value })));
   }
 }
